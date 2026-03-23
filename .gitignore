@@ -1,0 +1,22 @@
+# Sekrety — NIGDY na GitHub!
+.env
+*.json
+!.streamlit/secrets.toml.example
+
+# Sesja Garmin (tokeny OAuth)
+SESJA_GARTH/
+
+# Eksporty lokalne
+exports/
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# System
+.DS_Store
+Thumbs.db

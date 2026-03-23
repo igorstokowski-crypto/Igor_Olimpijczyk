@@ -1,0 +1,11 @@
+garth
+garminconnect
+google-api-python-client
+google-auth
+pandas
+openpyxl
+python-dotenv
+requests
+streamlit
+plotly
+numpy
