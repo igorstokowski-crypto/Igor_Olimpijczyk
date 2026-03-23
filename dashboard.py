@@ -211,8 +211,7 @@ st.divider()
 st.markdown('<div class="sec">📊 Sylwetka</div>', unsafe_allow_html=True)
 c1, c2, c3 = st.columns(3)
 
-delta_w = f"{weight_delta:+.1f} kg (7 dni)" if weight_delta is not None else None
-c1.metric("⚖️ Waga", fmt(latest_weight, " kg", 1), delta=delta_w, delta_color="inverse")
+c1.metric("⚖️ Waga", fmt(latest_weight, " kg", 1))
 c2.metric("📏 Wzrost", "181 cm")
 
 def sleep_label(s):
