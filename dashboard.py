@@ -122,34 +122,27 @@ sleep_h     = n(row_yd.get("Sen_h"))             if row_yd is not None else None
 sleep_score = n(row_yd.get("Jakos_snu"))         if row_yd is not None else None
 dist_day    = n(row_yd.get("Dystans_dzienny_km")) if row_yd is not None else None
 
-# Fitatu — sprawdź wczoraj, a jeśli brak to ostatni dostępny dzień
+# Fitatu — weź ostatni dostępny dzień (A=Data, B=Kcal)
 fit_row, kcal_eaten, fit_date_used = None, None, yday
 
-def match_date(df, col, date_str):
-    """Dopasuj datę ignorując format (YYYY-MM-DD lub inne)."""
-    mask = df[col].str.strip().str[:10] == date_str
-    return df[mask]
-
 if not df_fit.empty and "Data" in df_fit.columns:
-    r = match_date(df_fit, "Data", yday)
-    if r.empty:
-        # weź ostatni dostępny dzień
-        df_fit_sorted = df_fit.copy()
-        df_fit_sorted["_dt"] = pd.to_datetime(df_fit_sorted["Data"].str.strip().str[:10], errors="coerce")
-        df_fit_sorted = df_fit_sorted.dropna(subset=["_dt"]).sort_values("_dt")
-        if not df_fit_sorted.empty:
-            r = df_fit_sorted.iloc[[-1]]
-            fit_date_used = df_fit_sorted["_dt"].iloc[-1].strftime("%Y-%m-%d")
-    if not r.empty:
-        fit_row    = r.iloc[-1]
-        kcal_eaten = n(fit_row.get("Kcal"))
+    df_fit2 = df_fit.copy()
+    df_fit2["_dt"] = pd.to_datetime(df_fit2["Data"].str.strip().str[:10], errors="coerce")
+    df_fit2 = df_fit2.dropna(subset=["_dt"]).sort_values("_dt")
+    if not df_fit2.empty:
+        # Preferuj wczoraj, w przeciwnym razie ostatni dostępny
+        r = df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == yday]
+        if r.empty:
+            r = df_fit2.iloc[[-1]]
+        fit_row      = r.iloc[-1]
+        fit_date_used = fit_row["_dt"].strftime("%Y-%m-%d")
+        # kolumna B = Kcal (fallback po indeksie jeśli nazwa nie pasuje)
+        kcal_eaten   = n(fit_row.get("Kcal")) or n(fit_row.iloc[1] if len(fit_row) > 1 else None)
 
-# Products — tak samo
+# Products
 prods = pd.DataFrame()
 if not df_prod.empty and "Data" in df_prod.columns:
-    prods = match_date(df_prod, "Data", fit_date_used).copy()
-    if prods.empty and fit_date_used != yday:
-        prods = match_date(df_prod, "Data", fit_date_used).copy()
+    prods = df_prod[df_prod["Data"].str.strip().str[:10] == fit_date_used].copy()
 
 # Balance
 balance = None
@@ -173,7 +166,7 @@ if not df_hevy.empty:
     h = df_hevy.copy()
     dc = "Data_start" if "Data_start" in h.columns else "Data"
     if dc in h.columns:
-        h["_dt"] = pd.to_datetime(h[dc], errors="coerce")
+        h["_dt"] = pd.to_datetime(h[dc], dayfirst=True, errors="coerce")
         h = h.dropna(subset=["_dt"])
         if not h.empty:
             wid  = h.sort_values("_dt").iloc[-1].get("ID_treningu")
@@ -223,8 +216,10 @@ c3.metric("😴 Sen", fmt(sleep_h, " h", 1), delta=sleep_label(sleep_score), del
 
 
 # ── Kalorie ───────────────────────────────────────────────────────────────────
+fit_date_label = datetime.strptime(fit_date_used, "%Y-%m-%d").strftime("%d.%m.%Y") if fit_date_used else "—"
+garmin_date_label = (date.today()-timedelta(days=1)).strftime("%d.%m.%Y")
 st.markdown(
-    f'<div class="sec">🔥 Kalorie — {(date.today()-timedelta(days=1)).strftime("%d.%m.%Y")}</div>',
+    f'<div class="sec">🔥 Kalorie — Garmin: {garmin_date_label} · Fitatu: {fit_date_label}</div>',
     unsafe_allow_html=True
 )
 c1, c2, c3, c4 = st.columns(4)
