@@ -5,8 +5,6 @@ dashboard.py — Personal health dashboard for Igor
 
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
-import numpy as np
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from datetime import date, datetime, timedelta
@@ -96,6 +94,7 @@ with st.spinner(""):
     df_hevy = sheet("Hevy")
     df_fit  = sheet("Fitatu")
     df_prod = sheet("FitatuProdukty")
+    df_gen  = sheet("General")
 
 
 # ── Dziennik ───────────────────────────────────────────────────────────────────
@@ -107,17 +106,15 @@ if not df_dz.empty and "Data" in df_dz.columns:
     m = dz["Data"].dt.strftime("%Y-%m-%d") == yday
     row_yd = dz[m].iloc[-1] if m.any() else None
 
-# weight
-waga_df, latest_weight, weight_delta = pd.DataFrame(), None, None
-if not dz.empty and "Waga_kg" in dz.columns:
-    waga_df = dz[["Data", "Waga_kg"]].copy()
-    waga_df["Waga_kg"] = waga_df["Waga_kg"].apply(n)
-    waga_df = waga_df.dropna(subset=["Waga_kg"]).sort_values("Data")
-    if not waga_df.empty:
-        latest_weight = waga_df["Waga_kg"].iloc[-1]
-        past = waga_df[waga_df["Data"] <= pd.Timestamp.now() - timedelta(days=7)]
-        if not past.empty:
-            weight_delta = latest_weight - past["Waga_kg"].iloc[-1]
+# weight — z arkusza General, komórka E2 (Current Weight)
+latest_weight = None
+try:
+    raw_w = _svc().values().get(
+        spreadsheetId=SPREADSHEET_ID, range="General!E2"
+    ).execute().get("values", [[]])[0][0]
+    latest_weight = n(raw_w)
+except Exception:
+    pass
 
 steps       = n(row_yd.get("Kroki"))             if row_yd is not None else None
 kcal_burned = n(row_yd.get("Kalorie_calkowite")) if row_yd is not None else None
@@ -125,18 +122,34 @@ sleep_h     = n(row_yd.get("Sen_h"))             if row_yd is not None else None
 sleep_score = n(row_yd.get("Jakos_snu"))         if row_yd is not None else None
 dist_day    = n(row_yd.get("Dystans_dzienny_km")) if row_yd is not None else None
 
-# Fitatu
-fit_row, kcal_eaten = None, None
+# Fitatu — sprawdź wczoraj, a jeśli brak to ostatni dostępny dzień
+fit_row, kcal_eaten, fit_date_used = None, None, yday
+
+def match_date(df, col, date_str):
+    """Dopasuj datę ignorując format (YYYY-MM-DD lub inne)."""
+    mask = df[col].str.strip().str[:10] == date_str
+    return df[mask]
+
 if not df_fit.empty and "Data" in df_fit.columns:
-    r = df_fit[df_fit["Data"] == yday]
+    r = match_date(df_fit, "Data", yday)
+    if r.empty:
+        # weź ostatni dostępny dzień
+        df_fit_sorted = df_fit.copy()
+        df_fit_sorted["_dt"] = pd.to_datetime(df_fit_sorted["Data"].str.strip().str[:10], errors="coerce")
+        df_fit_sorted = df_fit_sorted.dropna(subset=["_dt"]).sort_values("_dt")
+        if not df_fit_sorted.empty:
+            r = df_fit_sorted.iloc[[-1]]
+            fit_date_used = df_fit_sorted["_dt"].iloc[-1].strftime("%Y-%m-%d")
     if not r.empty:
         fit_row    = r.iloc[-1]
         kcal_eaten = n(fit_row.get("Kcal"))
 
-# Products
+# Products — tak samo
 prods = pd.DataFrame()
 if not df_prod.empty and "Data" in df_prod.columns:
-    prods = df_prod[df_prod["Data"] == yday].copy()
+    prods = match_date(df_prod, "Data", fit_date_used).copy()
+    if prods.empty and fit_date_used != yday:
+        prods = match_date(df_prod, "Data", fit_date_used).copy()
 
 # Balance
 balance = None
@@ -180,7 +193,7 @@ if not df_hevy.empty:
 c_img, c_name, c_date = st.columns([1, 4, 2])
 with c_img:
     try:
-        st.image("zdj.jpg", width=90, output_format="JPEG")
+        st.image("zdj.jpg", width=160, output_format="JPEG")
     except Exception:
         pass
 with c_name:
@@ -324,40 +337,6 @@ with c_kardio:
         """, unsafe_allow_html=True)
 
 
-# ── Trend wagowy ──────────────────────────────────────────────────────────────
-if not waga_df.empty and len(waga_df) > 2:
-    st.markdown('<div class="sec">📈 Trend wagowy (90 dni)</div>', unsafe_allow_html=True)
-    w90 = waga_df[waga_df["Data"] >= pd.Timestamp.now() - timedelta(days=90)].copy()
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=w90["Data"], y=w90["Waga_kg"],
-        mode="lines+markers",
-        line=dict(color="#6366F1", width=2),
-        marker=dict(size=5, color="#6366F1"),
-        name="Waga",
-        hovertemplate="%{x|%d.%m.%Y}  <b>%{y:.1f} kg</b><extra></extra>"
-    ))
-    if len(w90) > 3:
-        xn = (w90["Data"] - w90["Data"].min()).dt.days.values
-        z  = np.polyfit(xn, w90["Waga_kg"].values, 1)
-        fig.add_trace(go.Scatter(
-            x=w90["Data"], y=np.poly1d(z)(xn),
-            mode="lines",
-            line=dict(color="#F59E0B", width=2, dash="dash"),
-            name="Trend", hoverinfo="skip"
-        ))
-    fig.update_layout(
-        height=280, margin=dict(l=0,r=0,t=10,b=0),
-        yaxis_title="kg", xaxis_title=None,
-        legend=dict(orientation="h", yanchor="bottom", y=1, xanchor="right", x=1),
-        hovermode="x unified", plot_bgcolor="white", paper_bgcolor="white",
-        xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor="#f5f5f5"),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.markdown('<div class="sec">📈 Trend wagowy</div>', unsafe_allow_html=True)
-    st.markdown('<div style="color:#bbb;font-size:.9rem;padding:.5rem 0">Brak danych o wadze — uzupełnij "Current Weight" w Garmin i uruchom sync.py</div>', unsafe_allow_html=True)
 
 
 # Footer
