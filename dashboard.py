@@ -550,27 +550,10 @@ if not hist_dz.empty and "Kroki" in hist_dz.columns:
         sparkline_layout(fig, "👟 Historia kroków")
         st.plotly_chart(fig, use_container_width=True)
 
-# ── 2. Kalorie spalone / spożyte / bilans ────────────────────────────────────
+# ── 2. Bilans kalorii ────────────────────────────────────────────────────────
 if not hist_bal.empty:
     df_b = hist_bal[hist_bal["Data"] >= cutoff].copy()
     if not df_b.empty:
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=df_b["Data"], y=df_b["Kalorie_calkowite"],
-            name="🔥 Spalone", mode="lines",
-            line=dict(color="#EF4444", width=2),
-            hovertemplate="%{x|%d.%m}: <b>%{y:,.0f}</b> kcal spalone<extra></extra>",
-        ))
-        fig.add_trace(go.Scatter(
-            x=df_b["Data"], y=df_b["Kcal"],
-            name="🥗 Spożyte", mode="lines",
-            line=dict(color="#10B981", width=2),
-            hovertemplate="%{x|%d.%m}: <b>%{y:,.0f}</b> kcal spożyte<extra></extra>",
-        ))
-        sparkline_layout(fig, "🔥 Kalorie — spalone vs spożyte")
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Bilans (deficyt/nadwyżka) — słupki kolorowe
         fig2 = go.Figure()
         bar_colors = ["#10B981" if v >= 0 else "#EF4444" for v in df_b["Bilans"]]
         fig2.add_trace(go.Bar(
@@ -579,7 +562,7 @@ if not hist_bal.empty:
             hovertemplate="%{x|%d.%m}: <b>%{y:+,.0f}</b> kcal<extra></extra>",
         ))
         fig2.add_hline(y=0, line_color="#888", line_width=1)
-        sparkline_layout(fig2, "📊 Bilans kalorii (+ deficyt / − nadwyżka)")
+        sparkline_layout(fig2, "📊 Bilans kalorii (🟢 deficyt / 🔴 nadwyżka)")
         fig2.update_layout(showlegend=False)
         st.plotly_chart(fig2, use_container_width=True)
 
@@ -640,32 +623,24 @@ if not df_prod.empty:
             kf = f"{kv:.0f}" if kv else ""
             rows_h += f"<tr><td style='font-weight:500;color:#111'>{nm}</td><td style='color:#555'>{gr}</td><td style='color:#E05A2B;font-weight:600'>{kf}</td></tr>"
 
-        # Pasek makro dla wybranego dnia
-        fit_day_row = None
+        # Makro dla wybranego dnia — native Streamlit
         if not hist_fit.empty:
             fd = hist_fit[hist_fit["_dt"].dt.date == sel_date]
             if not fd.empty:
                 fit_day_row = fd.iloc[-1]
+                cb2 = df_fit.columns[1] if len(df_fit.columns) > 1 else None
+                cp2 = df_fit.columns[2] if len(df_fit.columns) > 2 else None
+                ct2 = df_fit.columns[3] if len(df_fit.columns) > 3 else None
+                cw2 = df_fit.columns[4] if len(df_fit.columns) > 4 else None
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1.metric("🔥 Kcal",      fmt(n(fit_day_row.get(cb2)), " kcal", 0))
+                mc2.metric("🥩 Białko",     fmt(n(fit_day_row.get(cp2)), " g", 0))
+                mc3.metric("🧈 Tłuszcze",   fmt(n(fit_day_row.get(ct2)), " g", 0))
+                mc4.metric("🍞 Węglowodany",fmt(n(fit_day_row.get(cw2)), " g", 0))
 
-        macro_pills = ""
-        if fit_day_row is not None:
-            cb2 = df_fit.columns[1] if len(df_fit.columns) > 1 else None
-            cp2 = df_fit.columns[2] if len(df_fit.columns) > 2 else None
-            ct2 = df_fit.columns[3] if len(df_fit.columns) > 3 else None
-            cw2 = df_fit.columns[4] if len(df_fit.columns) > 4 else None
-            def mp(icon, col):
-                val = n(fit_day_row.get(col)) if col else None
-                return f'<span class="stat-pill">{icon} {val:.0f} g</span>' if val else ""
-            kday = n(fit_day_row.get(cb2)) if cb2 else None
-            macro_pills = f"""
-            <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.8rem">
-              {'<span class="stat-pill">🔥 ' + f"{kday:.0f} kcal</span>" if kday else ""}
-              {mp("🥩 Białko", cp2)}{mp("🧈 Tłuszcze", ct2)}{mp("🍞 Węgle", cw2)}
-            </div>"""
-
+        # Tabela produktów
         st.markdown(f"""
         <div class="card">
-          {macro_pills}
           <table style="width:100%;border-collapse:collapse">
             <thead>
               <tr style="font-size:.7rem;color:#aaa;text-transform:uppercase;letter-spacing:.05em">
@@ -677,7 +652,7 @@ if not df_prod.empty:
             <tbody style="font-size:.88rem">{rows_h}</tbody>
           </table>
           <div style="margin-top:.7rem;font-size:.82rem;color:#aaa;text-align:right">
-            Łącznie: <b style="color:#E05A2B">{int(tot)} kcal</b> · {len(day_prods)} produktów
+            Łącznie: <b style="color:#E05A2B">{int(tot)} kcal</b> &nbsp;·&nbsp; {len(day_prods)} produktów
           </div>
         </div>
         """, unsafe_allow_html=True)
