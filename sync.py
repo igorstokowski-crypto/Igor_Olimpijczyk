@@ -680,7 +680,366 @@ def append_to_sheet(sheets, tab: str, cols: list, rows: list[dict]):
     print(f"  ✓ {tab}: +{len(rows)} wierszy")
 
 # ── EKSPORT LOKALNY ───────────────────────────────────
-def save_local(datasets: list[tuple[str, list, list]]):
+
+def _n(v):
+    """Bezpieczna konwersja do float."""
+    try: return float(str(v).replace(",", ".").strip())
+    except: return None
+
+def _read_full_sheet(sheets, tab: str) -> pd.DataFrame:
+    """Wczytuje cały arkusz Google Sheets jako DataFrame."""
+    try:
+        res = sheets.values().get(
+            spreadsheetId=SPREADSHEET_ID, range=f"'{tab}'!A:ZZ"
+        ).execute()
+        rows = res.get("values", [])
+        if len(rows) < 2:
+            return pd.DataFrame()
+        n = len(rows[0])
+        return pd.DataFrame([r + [""] * (n - len(r)) for r in rows[1:]], columns=rows[0])
+    except Exception:
+        return pd.DataFrame()
+
+def build_analytics(sheets) -> dict[str, pd.DataFrame]:
+    """
+    Czyta pełną historię z Google Sheets i oblicza arkusze analityczne.
+    Zwraca słownik {nazwa_arkusza: DataFrame}.
+    """
+    import numpy as np
+
+    # ── Wczytaj pełną historię ─────────────────────────
+    df_dz   = _read_full_sheet(sheets, "Dziennik")
+    df_akt  = _read_full_sheet(sheets, "Aktywności")
+    df_fit  = _read_full_sheet(sheets, "Fitatu")
+    df_hevy = _read_full_sheet(sheets, "Hevy")
+
+    # Normalizuj Fitatu — stare nagłówki: 'Dzień','Białko (g)','Tłuszcze (G)','Węgle (g)'
+    if not df_fit.empty:
+        df_fit = df_fit.rename(columns={
+            "Dzień":         "Data",
+            "Białko (g)":    "Bialko_g",
+            "Białko (G)":    "Bialko_g",
+            "Tłuszcze (g)":  "Tluszcze_g",
+            "Tłuszcze (G)":  "Tluszcze_g",
+            "Węgle (g)":     "Wegle_g",
+            "Węgle (G)":     "Wegle_g",
+        })
+
+    result = {}
+
+    # ══════════════════════════════════════════════════
+    # 1. STATYSTYKI — ogólne metryki i średnie
+    # ══════════════════════════════════════════════════
+    stats_rows = []
+
+    if not df_dz.empty:
+        for col in ["Kroki", "Kalorie_calkowite", "Kalorie_aktywne",
+                    "Sen_h", "Jakos_snu", "HR_spoczynkowe", "Stres_sr",
+                    "Intensywne_min", "Waga_kg"]:
+            if col in df_dz.columns:
+                df_dz[col] = df_dz[col].apply(_n)
+        df_dz["Data"] = pd.to_datetime(df_dz["Data"], errors="coerce")
+        df_dz = df_dz.dropna(subset=["Data"]).sort_values("Data")
+
+        steps = df_dz["Kroki"].dropna()
+        sleep = df_dz["Sen_h"].dropna()
+        hr    = df_dz["HR_spoczynkowe"].dropna()
+        stress= df_dz["Stres_sr"].dropna()
+        waga  = df_dz["Waga_kg"].dropna()
+
+        stats_rows += [
+            ("KROKI", "", ""),
+            ("Średnia dzienna",          f"{steps.mean():.0f}" if len(steps) else "—", "kroków"),
+            ("Mediana dzienna",           f"{steps.median():.0f}" if len(steps) else "—", "kroków"),
+            ("Maksimum (1 dzień)",        f"{steps.max():.0f}" if len(steps) else "—", "kroków"),
+            ("Dni z celem 10 000+",       f"{(steps >= 10000).sum()}", f"/ {len(steps)} dni"),
+            ("Łącznie wszystkich kroków", f"{steps.sum():.0f}", "kroków"),
+            ("", "", ""),
+            ("SEN", "", ""),
+            ("Średni sen",               f"{sleep.mean():.2f}" if len(sleep) else "—", "h"),
+            ("Najkrótszy sen",           f"{sleep.min():.2f}" if len(sleep) else "—", "h"),
+            ("Najdłuższy sen",           f"{sleep.max():.2f}" if len(sleep) else "—", "h"),
+            ("Dni < 7h snu",             f"{(sleep < 7).sum()}", f"/ {len(sleep)} dni"),
+            ("", "", ""),
+            ("TĘTNO SPOCZYNKOWE", "", ""),
+            ("Średnie HR spoczynkowe",    f"{hr.mean():.1f}" if len(hr) else "—", "bpm"),
+            ("Najniższe HR",             f"{hr.min():.0f}" if len(hr) else "—", "bpm"),
+            ("Najwyższe HR",             f"{hr.max():.0f}" if len(hr) else "—", "bpm"),
+            ("", "", ""),
+            ("STRES", "", ""),
+            ("Średni stres",             f"{stress.mean():.1f}" if len(stress) else "—", "/ 100"),
+            ("Dni z niskim stresem (<25)", f"{(stress < 25).sum()}", f"/ {len(stress)} dni"),
+            ("Dni z wysokim stresem (>50)", f"{(stress > 50).sum()}", f"/ {len(stress)} dni"),
+        ]
+        if len(waga) > 0:
+            bmi = waga.iloc[-1] / (1.81 ** 2)
+            stats_rows += [
+                ("", "", ""),
+                ("WAGA", "", ""),
+                ("Ostatnia waga",         f"{waga.iloc[-1]:.1f}", "kg"),
+                ("BMI (wzrost 181 cm)",   f"{bmi:.1f}", "kg/m²"),
+                ("Najniższa waga",        f"{waga.min():.1f}", "kg"),
+                ("Najwyższa waga",        f"{waga.max():.1f}", "kg"),
+            ]
+
+    if not df_fit.empty:
+        for col in ["Kcal", "Bialko_g", "Tluszcze_g", "Wegle_g"]:
+            if col in df_fit.columns:
+                df_fit[col] = df_fit[col].apply(_n)
+        df_fit["Data"] = pd.to_datetime(df_fit["Data"], errors="coerce")
+        df_fit = df_fit.dropna(subset=["Data"]).sort_values("Data")
+
+        kcal = df_fit["Kcal"].dropna()
+        bial = df_fit["Bialko_g"].dropna()
+        tlus = df_fit["Tluszcze_g"].dropna()
+        wegl = df_fit["Wegle_g"].dropna()
+
+        stats_rows += [
+            ("", "", ""),
+            ("ODŻYWIANIE (Fitatu)", "", ""),
+            ("Średnie kcal / dzień",     f"{kcal.mean():.0f}" if len(kcal) else "—", "kcal"),
+            ("Maks kcal w dzień",        f"{kcal.max():.0f}" if len(kcal) else "—", "kcal"),
+            ("Min kcal w dzień",         f"{kcal.min():.0f}" if len(kcal) else "—", "kcal"),
+            ("Średnie białko",           f"{bial.mean():.1f}" if len(bial) else "—", "g/dzień"),
+            ("Średnie tłuszcze",         f"{tlus.mean():.1f}" if len(tlus) else "—", "g/dzień"),
+            ("Średnie węgle",            f"{wegl.mean():.1f}" if len(wegl) else "—", "g/dzień"),
+        ]
+
+        if not df_dz.empty:
+            merged = df_dz.merge(df_fit[["Data", "Kcal"]], on="Data", how="inner")
+            if "Kalorie_calkowite" in merged.columns:
+                merged["Bilans"] = merged["Kalorie_calkowite"] - merged["Kcal"]
+                bilans = merged["Bilans"].dropna()
+                deficyt = (bilans < 0).sum()
+                nadwyzka = (bilans >= 0).sum()
+                stats_rows += [
+                    ("", "", ""),
+                    ("BILANS KALORYCZNY", "", ""),
+                    ("Średni bilans / dzień",  f"{bilans.mean():.0f}" if len(bilans) else "—", "kcal"),
+                    ("Dni z deficytem",        f"{deficyt}", f"/ {len(bilans)} dni"),
+                    ("Dni z nadwyżką",         f"{nadwyzka}", f"/ {len(bilans)} dni"),
+                    ("Łączny bilans",          f"{bilans.sum():.0f}", "kcal"),
+                ]
+
+    if not df_akt.empty:
+        for col in ["Dystans_km", "Kalorie", "HR_sr", "Wznios_m"]:
+            if col in df_akt.columns:
+                df_akt[col] = df_akt[col].apply(_n)
+        df_akt["Data"] = pd.to_datetime(df_akt["Data"], errors="coerce")
+        df_akt = df_akt.dropna(subset=["Data"]).sort_values("Data")
+
+        if "Typ" in df_akt.columns:
+            biegi = df_akt[df_akt["Typ"].str.lower().isin(RUNNING_TYPES)]
+            rowery = df_akt[df_akt["Typ"].str.lower().isin(CYCLING_TYPES)]
+            stats_rows += [
+                ("", "", ""),
+                ("AKTYWNOŚCI ŁĄCZNIE", "", ""),
+                ("Wszystkich treningów",   f"{len(df_akt)}", ""),
+                ("Łączny dystans",        f"{df_akt['Dystans_km'].sum():.1f}" if "Dystans_km" in df_akt.columns else "—", "km"),
+                ("", "", ""),
+                ("BIEGANIE", "", ""),
+                ("Liczba biegów",          f"{len(biegi)}", ""),
+                ("Łączny dystans",        f"{biegi['Dystans_km'].sum():.1f}" if len(biegi) else "—", "km"),
+                ("Średni dystans",        f"{biegi['Dystans_km'].mean():.2f}" if len(biegi) else "—", "km"),
+                ("Łączne wzniesienie",    f"{biegi['Wznios_m'].sum():.0f}" if len(biegi) else "—", "m"),
+                ("", "", ""),
+                ("ROWER / INNE KARDIO", "", ""),
+                ("Liczba jazd",            f"{len(rowery)}", ""),
+                ("Łączny dystans",        f"{rowery['Dystans_km'].sum():.1f}" if len(rowery) else "—", "km"),
+            ]
+
+    if not df_hevy.empty:
+        df_hevy["Data_start"] = pd.to_datetime(df_hevy["Data_start"] if "Data_start" in df_hevy.columns else df_hevy.get("Data", ""), errors="coerce")
+        sesje = df_hevy["ID_treningu"].nunique() if "ID_treningu" in df_hevy.columns else 0
+        stats_rows += [
+            ("", "", ""),
+            ("SIŁOWNIA (Hevy)", "", ""),
+            ("Łączna liczba sesji",  f"{sesje}", ""),
+            ("Łączna liczba serii",  f"{len(df_hevy)}", ""),
+        ]
+
+    result["Statystyki"] = pd.DataFrame(stats_rows, columns=["Metryka", "Wartość", "Jednostka"])
+
+    # ══════════════════════════════════════════════════
+    # 2. MIESIĄCE — zestawienie per miesiąc
+    # ══════════════════════════════════════════════════
+    miesiace_rows = []
+
+    if not df_dz.empty:
+        df_dz["Miesiac"] = df_dz["Data"].dt.to_period("M")
+        gr_dz = df_dz.groupby("Miesiac")
+
+        miesiace_map = {}
+        for m, grp in gr_dz:
+            miesiace_map[str(m)] = {
+                "Kroki_suma":   grp["Kroki"].sum() if "Kroki" in grp else 0,
+                "Kroki_sr":     grp["Kroki"].mean() if "Kroki" in grp else 0,
+                "Sen_sr":       grp["Sen_h"].mean() if "Sen_h" in grp else 0,
+                "HR_sr":        grp["HR_spoczynkowe"].mean() if "HR_spoczynkowe" in grp else 0,
+                "Intensywne_suma": grp["Intensywne_min"].sum() if "Intensywne_min" in grp else 0,
+            }
+
+        if not df_fit.empty:
+            df_fit["Miesiac"] = df_fit["Data"].dt.to_period("M")
+            gr_fit = df_fit.groupby("Miesiac")
+            for m, grp in gr_fit:
+                ms = str(m)
+                if ms not in miesiace_map:
+                    miesiace_map[ms] = {}
+                miesiace_map[ms]["Kcal_sr"]   = grp["Kcal"].mean() if "Kcal" in grp else 0
+                miesiace_map[ms]["Bialko_sr"]  = grp["Bialko_g"].mean() if "Bialko_g" in grp else 0
+                miesiace_map[ms]["Tluszcze_sr"] = grp["Tluszcze_g"].mean() if "Tluszcze_g" in grp else 0
+                miesiace_map[ms]["Wegle_sr"]   = grp["Wegle_g"].mean() if "Wegle_g" in grp else 0
+
+        if not df_akt.empty:
+            df_akt["Miesiac"] = df_akt["Data"].dt.to_period("M")
+            gr_akt = df_akt.groupby("Miesiac")
+            for m, grp in gr_akt:
+                ms = str(m)
+                if ms not in miesiace_map:
+                    miesiace_map[ms] = {}
+                typ = grp["Typ"].str.lower() if "Typ" in grp else pd.Series([], dtype=str)
+                miesiace_map[ms]["Treningi_laczn"] = len(grp)
+                miesiace_map[ms]["Km_laczn"]       = grp["Dystans_km"].sum() if "Dystans_km" in grp else 0
+                miesiace_map[ms]["Biegi_ile"]       = int(typ.isin(RUNNING_TYPES).sum())
+                miesiace_map[ms]["Biegi_km"]        = float(grp.loc[typ.isin(RUNNING_TYPES), "Dystans_km"].sum()) if "Dystans_km" in grp else 0
+                miesiace_map[ms]["Wznios_m"]        = grp["Wznios_m"].sum() if "Wznios_m" in grp else 0
+
+        if not df_hevy.empty:
+            dc = "Data_start" if "Data_start" in df_hevy.columns else "Data"
+            if dc in df_hevy.columns:
+                df_hevy["_dt"] = pd.to_datetime(df_hevy[dc], errors="coerce")
+                df_hevy["Miesiac"] = df_hevy["_dt"].dt.to_period("M")
+                gr_h = df_hevy.groupby("Miesiac")
+                for m, grp in gr_h:
+                    ms = str(m)
+                    if ms not in miesiace_map:
+                        miesiace_map[ms] = {}
+                    miesiace_map[ms]["Silownia_ile"] = grp["ID_treningu"].nunique() if "ID_treningu" in grp else 0
+
+        for ms in sorted(miesiace_map.keys()):
+            d = miesiace_map[ms]
+            miesiace_rows.append({
+                "Miesiąc":           ms,
+                "Kroki suma":        round(d.get("Kroki_suma", 0)),
+                "Kroki śr/dzień":    round(d.get("Kroki_sr", 0)),
+                "Sen śr (h)":        round(d.get("Sen_sr", 0), 2),
+                "HR spocz. śr":      round(d.get("HR_sr", 0), 1),
+                "Intens. min suma":  round(d.get("Intensywne_suma", 0)),
+                "Kcal śr/dzień":     round(d.get("Kcal_sr", 0)),
+                "Białko śr (g)":     round(d.get("Bialko_sr", 0), 1),
+                "Tłuszcze śr (g)":   round(d.get("Tluszcze_sr", 0), 1),
+                "Węgle śr (g)":      round(d.get("Wegle_sr", 0), 1),
+                "Treningi":          d.get("Treningi_laczn", 0),
+                "Km łącznie":        round(d.get("Km_laczn", 0), 1),
+                "Biegi (ile)":       d.get("Biegi_ile", 0),
+                "Biegi km":          round(d.get("Biegi_km", 0), 1),
+                "Wzniesienie m":     round(d.get("Wznios_m", 0)),
+                "Siłownia (ile)":    d.get("Silownia_ile", 0),
+            })
+
+    result["Miesiące"] = pd.DataFrame(miesiace_rows) if miesiace_rows else pd.DataFrame()
+
+    # ══════════════════════════════════════════════════
+    # 3. REKORDY — personal bests
+    # ══════════════════════════════════════════════════
+    rekordy_rows = []
+
+    if not df_akt.empty and "Typ" in df_akt.columns:
+        biegi = df_akt[df_akt["Typ"].str.lower().isin(RUNNING_TYPES)].copy()
+
+        if len(biegi) > 0:
+            rekordy_rows.append(("BIEGANIE — REKORDY", "", "", ""))
+
+            if "Dystans_km" in biegi.columns:
+                idx = biegi["Dystans_km"].idxmax()
+                r = biegi.loc[idx]
+                rekordy_rows.append(("Najdłuższy bieg", f"{r['Dystans_km']:.2f} km",
+                                     str(r["Data"])[:10], r.get("Nazwa", "")))
+
+            if "Tempo_sr" in biegi.columns:
+                biegi_z_tempem = biegi[biegi["Tempo_sr"].apply(lambda x: bool(str(x).strip() and str(x) != "0"))]
+                if len(biegi_z_tempem) > 0:
+                    idx = biegi_z_tempem["Tempo_sr"].astype(str).apply(
+                        lambda t: sum(int(x) * (60 ** i) for i, x in enumerate(reversed(t.split(":")))) if ":" in t else 9999
+                    ).idxmin()
+                    r = biegi_z_tempem.loc[idx]
+                    rekordy_rows.append(("Najszybsze tempo śr.", r["Tempo_sr"],
+                                         str(r["Data"])[:10], f"{r['Dystans_km']:.2f} km"))
+
+            if "Wznios_m" in biegi.columns:
+                idx = biegi["Wznios_m"].idxmax()
+                r = biegi.loc[idx]
+                rekordy_rows.append(("Największe wzniesienie", f"{r['Wznios_m']:.0f} m",
+                                     str(r["Data"])[:10], f"{r['Dystans_km']:.2f} km"))
+
+            if "HR_sr" in biegi.columns:
+                idx = biegi["HR_sr"].idxmin()
+                r = biegi.loc[idx]
+                rekordy_rows.append(("Najniższe HR podczas biegu", f"{r['HR_sr']:.0f} bpm",
+                                     str(r["Data"])[:10], f"{r['Dystans_km']:.2f} km"))
+
+            # Rekordy dystansowe
+            for prog, label in [(5, "5 km"), (10, "10 km"), (21, "półmaraton"), (42, "maraton")]:
+                kandydaci = biegi[biegi["Dystans_km"] >= prog] if "Dystans_km" in biegi.columns else pd.DataFrame()
+                if len(kandydaci) > 0 and "Tempo_sr" in kandydaci.columns:
+                    idx = kandydaci["Tempo_sr"].astype(str).apply(
+                        lambda t: sum(int(x) * (60 ** i) for i, x in enumerate(reversed(t.split(":")))) if ":" in t else 9999
+                    ).idxmin()
+                    r = kandydaci.loc[idx]
+                    rekordy_rows.append((f"Najszybszy bieg {label}+", r["Tempo_sr"],
+                                         str(r["Data"])[:10], f"{r['Dystans_km']:.2f} km"))
+
+    if not df_hevy.empty and "Cwiczenie" in df_hevy.columns:
+        df_hevy["KG"] = df_hevy["KG"].apply(_n) if "KG" in df_hevy.columns else 0
+        df_hevy["Reps"] = df_hevy["Reps"].apply(_n) if "Reps" in df_hevy.columns else 0
+        df_hevy["Wolumen"] = df_hevy["KG"] * df_hevy["Reps"]
+
+        rekordy_rows.append(("", "", "", ""))
+        rekordy_rows.append(("SIŁOWNIA — REKORDY (max ciężar per ćwiczenie)", "", "", ""))
+
+        top_cwiczenia = df_hevy.groupby("Cwiczenie")["KG"].max().sort_values(ascending=False).head(15)
+        for cwicz, max_kg in top_cwiczenia.items():
+            row_best = df_hevy[(df_hevy["Cwiczenie"] == cwicz) & (df_hevy["KG"] == max_kg)].iloc[0]
+            dc = "Data_start" if "Data_start" in df_hevy.columns else "Data"
+            rekordy_rows.append((
+                cwicz,
+                f"{max_kg:.1f} kg × {int(row_best['Reps'] or 0)} reps",
+                str(row_best.get(dc, ""))[:10],
+                f"wolumen: {row_best['Wolumen']:.0f} kg"
+            ))
+
+    result["Rekordy"] = pd.DataFrame(rekordy_rows, columns=["Ćwiczenie / Metryka", "Wynik", "Data", "Opis"]) if rekordy_rows else pd.DataFrame()
+
+    # ══════════════════════════════════════════════════
+    # 4. BILANS KCAL — dzień po dniu
+    # ══════════════════════════════════════════════════
+    if not df_dz.empty and not df_fit.empty and "Kalorie_calkowite" in df_dz.columns:
+        merged = df_dz[["Data", "Kroki", "Kalorie_calkowite", "Kalorie_aktywne", "Sen_h", "HR_spoczynkowe"]].merge(
+            df_fit[["Data", "Kcal", "Bialko_g", "Tluszcze_g", "Wegle_g"]], on="Data", how="outer"
+        ).sort_values("Data")
+        merged["Bilans_kcal"] = merged["Kalorie_calkowite"] - merged["Kcal"]
+        merged["Data"] = merged["Data"].dt.strftime("%Y-%m-%d")
+        for col in merged.select_dtypes(include="float64").columns:
+            merged[col] = merged[col].round(2)
+        result["Bilans kcal"] = merged.rename(columns={
+            "Kalorie_calkowite": "Spalone kcal",
+            "Kalorie_aktywne":   "Aktywne kcal",
+            "Kcal":              "Spożyte kcal",
+            "Bialko_g":          "Białko g",
+            "Tluszcze_g":        "Tłuszcze g",
+            "Wegle_g":           "Węgle g",
+            "Bilans_kcal":       "Bilans kcal",
+            "Sen_h":             "Sen h",
+            "HR_spoczynkowe":    "HR spocz.",
+        })
+    else:
+        result["Bilans kcal"] = pd.DataFrame()
+
+    return result
+
+
+def save_local(datasets: list[tuple[str, list, list]], sheets=None):
     OUTPUT_DIR.mkdir(exist_ok=True)
     xlsx_path = OUTPUT_DIR / "sync_data.xlsx"
     with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
@@ -689,6 +1048,20 @@ def save_local(datasets: list[tuple[str, list, list]]):
             safe_name = sheet_name.replace("ę", "e").replace("ó", "o").replace("ą", "a")
             df.to_csv(OUTPUT_DIR / f"{safe_name}.csv", index=False, encoding="utf-8-sig")
             df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+        # Arkusze analityczne — czytamy pełną historię z Google Sheets
+        if sheets is not None:
+            try:
+                import traceback
+                analytics = build_analytics(sheets)
+                for aname, adf in analytics.items():
+                    if not adf.empty:
+                        adf.to_excel(writer, sheet_name=aname, index=False)
+                print(f"  ✓ Analiza: {', '.join(analytics.keys())}")
+            except Exception as e:
+                traceback.print_exc()
+                print(f"  ⚠️ Błąd analizy: {e}")
+
     print(f"  📁 {xlsx_path.name}  +  {len(datasets)}x .csv  →  /{OUTPUT_DIR.name}/")
 
 # ── GŁÓWNA LOGIKA ─────────────────────────────────────
@@ -855,7 +1228,7 @@ def main():
         ("FitatuProdukty", new["FitatuProdukty"],  FITATU_PROD_COLS),
         ("Hevy",           new["Hevy"],            HEVY_COLS),
         ("Trasy",          new["Trasy"],           TRASY_COLS),
-    ])
+    ], sheets=sheets)
 
     # ── ZAPISZ DATĘ SYNC ──────────────────────────────
     today_str = datetime.date.today().isoformat()
