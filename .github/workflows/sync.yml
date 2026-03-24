@@ -1,0 +1,56 @@
+name: Health Sync
+
+on:
+  schedule:
+    - cron: '0 * * * *'   # co godzinę
+  workflow_dispatch:        # ręczne odpalenie z GitHub UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Zainstaluj zależności
+        run: pip install -r requirements.txt
+
+      - name: Przywróć sesję Garmin
+        run: |
+          mkdir -p SESJA_GARTH
+          echo "${{ secrets.GARTH_SESSION }}" | base64 -d > SESJA_GARTH/oauth2_token.json
+
+      - name: Utwórz .env
+        run: |
+          cat <<EOF > .env
+          GARMIN_EMAIL=${{ secrets.GARMIN_EMAIL }}
+          GARMIN_PASSWORD=${{ secrets.GARMIN_PASSWORD }}
+          GARMIN_DISPLAY_NAME=${{ secrets.GARMIN_DISPLAY_NAME }}
+          FITATU_EMAIL=${{ secrets.FITATU_EMAIL }}
+          FITATU_PASSWORD=${{ secrets.FITATU_PASSWORD }}
+          HEVY_API_KEY=${{ secrets.HEVY_API_KEY }}
+          SPREADSHEET_ID=${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS=credentials.json
+          EOF
+
+      - name: Utwórz credentials Google
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+
+      - name: Uruchom sync
+        run: python sync.py
+
+      - name: Zaktualizuj sesję Garmin (jeśli odświeżona)
+        if: always()
+        run: |
+          if [ -f "SESJA_GARTH/oauth2_token.json" ]; then
+            NEW_SESSION=$(base64 -w 0 SESJA_GARTH/oauth2_token.json)
+            echo "Sesja Garmin OK ($(wc -c < SESJA_GARTH/oauth2_token.json) bajtów)"
+          fi
