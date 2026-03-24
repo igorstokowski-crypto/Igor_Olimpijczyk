@@ -41,11 +41,14 @@ st.markdown("""
   .ex-pill { background: #EEF2FF; color: #4F46E5; border-radius: 20px; padding: 3px 10px; font-size: 0.8rem; display: inline-block; margin: 2px; }
 
   .prod-table { width: 100%; border-collapse: collapse; margin-top: .4rem; }
-  .prod-table th { font-size: 0.72rem; color: #aaa; text-transform: uppercase; letter-spacing: .05em;
-                   border-bottom: 1px solid #f0f0f0; padding: 4px 8px; text-align: left; }
-  .prod-table td { font-size: 0.88rem; padding: 5px 8px; border-bottom: 1px solid #fafafa; }
+  .prod-table th { font-size: 0.72rem; color: #666; text-transform: uppercase; letter-spacing: .05em;
+                   border-bottom: 2px solid #e8e8e8; padding: 6px 10px; text-align: left; font-weight: 700; }
+  .prod-table td { font-size: 0.92rem; padding: 7px 10px; border-bottom: 1px solid #f0f0f0; color: #111; font-weight: 500; }
+  .prod-table td:nth-child(2) { color: #555; font-weight: 400; }
+  .prod-table td:nth-child(3) { color: #E05A2B; font-weight: 600; }
+  .prod-table tr:hover td { background: #f7f7f7; }
   .prod-table tr:last-child td { border-bottom: none; }
-  .prod-kcal { color: #888; font-size: 0.8rem; }
+  .prod-kcal { color: #E05A2B; font-size: 0.85rem; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
