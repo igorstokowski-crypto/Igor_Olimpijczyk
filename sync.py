@@ -769,24 +769,29 @@ def main():
                 if a.get("activityType", {}).get("typeKey") in ALL_TYPES]
         print(f"  Znaleziono: {len(acts)}")
         for act in acts:
-            if str(act["activityId"]) in existing_akt:
-                continue  # aktywności się nie zmieniają po zapisie
-            act_row, laps = fetch_garmin_activity(garmin, act)
-            new["Aktywności"].append(act_row)
-            new["Okrążenia"].extend(laps)
-            # GPS trasa — tylko jeśli jeszcze nie mamy
             act_id_str = str(act["activityId"])
+            act_typ    = act.get("activityType", {}).get("typeKey", "")
+
+            # GPS — pobierz dla każdej aktywności której jeszcze nie ma w Trasy
             if act_id_str not in existing_trasy:
-                gps_json = fetch_gps_track(garmin, act["activityId"], act_row.get("Typ", ""))
+                gps_json = fetch_gps_track(garmin, act["activityId"], act_typ)
                 if gps_json:
                     new["Trasy"].append({
                         "Aktywnosc_ID": act_id_str,
-                        "Typ":          act_row.get("Typ", ""),
+                        "Typ":          act_typ,
                         "Punkty_JSON":  gps_json,
                     })
-                    print(f"    🗺️  GPS: {len(json.loads(gps_json))} punktów")
+                    print(f"    🗺️  GPS {act_id_str}: {len(json.loads(gps_json))} punktów")
                 else:
-                    print(f"    🏟️  Brak GPS (indoor/bieżnia)")
+                    print(f"    🏟️  Brak GPS {act_id_str} (indoor/bieżnia)")
+                time.sleep(0.5)
+
+            # Szczegóły aktywności — tylko nowe
+            if act_id_str in existing_akt:
+                continue
+            act_row, laps = fetch_garmin_activity(garmin, act)
+            new["Aktywności"].append(act_row)
+            new["Okrążenia"].extend(laps)
             lap_info = f"  {len(laps)} okr." if laps else ""
             print(f"  {act_row['Data']}  [{act_row['Typ']}]  "
                   f"{act_row['Dystans_km']} km{lap_info}")
