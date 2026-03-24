@@ -1050,8 +1050,15 @@ with tab_miesiace:
         display_cols = [c for c in ["Miesiąc","Kroki suma","Kroki śr/dzień","Km łącznie",
                                      "Biegi","Siłownia","Kardio","Kcal śr/dzień",
                                      "Sen śr (h)","HR spocz. śr","Intens. min"] if c in df_months.columns]
-        st.dataframe(df_months[display_cols].iloc[::-1].reset_index(drop=True),
-                     use_container_width=True, hide_index=True)
+        df_show = df_months[display_cols].iloc[::-1].reset_index(drop=True)
+        # Konwertuj wszystkie kolumny na bezpieczne typy (Period → str, float → round)
+        for col in df_show.columns:
+            df_show[col] = df_show[col].apply(
+                lambda v: str(v) if hasattr(v, 'strftime') or hasattr(v, 'freqstr') else
+                          round(float(v), 1) if isinstance(v, float) else
+                          (int(v) if isinstance(v, (int,)) else v)
+            )
+        st.dataframe(df_show, use_container_width=True, hide_index=True)
     else:
         st.info("Brak danych miesięcznych")
 
