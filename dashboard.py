@@ -143,10 +143,11 @@ if not df_fit.empty:
         if col_kcal:
             kcal_eaten = n(fit_row[col_kcal])
 
-# Products
+# Products — A=Data, B=Produkt, reszta kolumn opcjonalnie
 prods = pd.DataFrame()
-if not df_prod.empty and "Data" in df_prod.columns:
-    prods = df_prod[df_prod["Data"].str.strip().str[:10] == fit_date_used].copy()
+if not df_prod.empty:
+    col_pd = df_prod.columns[0]   # A — data
+    prods = df_prod[df_prod[col_pd].astype(str).str.strip().str[:10] == fit_date_used].copy()
 
 # Balance
 balance = None
@@ -260,17 +261,22 @@ if fit_row is not None:
 st.markdown('<div class="sec">🛒 Co jadłem wczoraj</div>', unsafe_allow_html=True)
 
 if not prods.empty:
-    cols_show = [c for c in ["Produkt", "Gramy", "Kcal"] if c in prods.columns]
+    # kolumny po pozycji: A=data(0), B=produkt(1), C+(2+) = opcjonalne (gramy, kcal itd.)
+    pcols = list(prods.columns)
+    col_name = pcols[1] if len(pcols) > 1 else pcols[0]
+    col_gram = pcols[2] if len(pcols) > 2 else None
+    col_kcal = pcols[3] if len(pcols) > 3 else None
+
     rows_html = ""
     total_kcal = 0
-    for _, row in prods[cols_show].iterrows():
-        produkt = row.get("Produkt", "")
-        gramy   = row.get("Gramy", "")
-        kcal_v  = row.get("Kcal", "")
-        g_fmt   = f"{n(gramy):.0f} g" if n(gramy) else gramy
+    for _, row in prods.iterrows():
+        produkt = row[col_name]
+        gramy   = row[col_gram] if col_gram else ""
+        kcal_v  = row[col_kcal] if col_kcal else ""
+        g_fmt   = f"{n(gramy):.0f} g" if n(gramy) else ""
         k_val   = n(kcal_v)
         if k_val: total_kcal += k_val
-        k_fmt   = f"{k_val:.0f}" if k_val else kcal_v
+        k_fmt   = f"{k_val:.0f}" if k_val else ""
         rows_html += f"<tr><td>{produkt}</td><td style='color:#888'>{g_fmt}</td><td style='color:#888'>{k_fmt}</td></tr>"
 
     st.markdown(f"""
