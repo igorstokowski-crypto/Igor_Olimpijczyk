@@ -168,8 +168,10 @@ if not df_akt.empty and "Data" in df_akt.columns:
     if not cardio_df.empty:
         last_cardio = cardio_df.sort_values("_dt").iloc[-1]
 
-# Last strength
-hevy_name, hevy_exs, hevy_date, hevy_sets = None, [], None, 0
+# Last strength — grupuj po ćwiczeniu: serie, max kg, łączna objętość
+hevy_name, hevy_date, hevy_duration = None, None, ""
+hevy_ex_rows = []   # [{"name":..,"sets":..,"best":..,"vol":..}]
+
 if not df_hevy.empty:
     h = df_hevy.copy()
     dc = "Data_start" if "Data_start" in h.columns else "Data"
@@ -177,13 +179,35 @@ if not df_hevy.empty:
         h["_dt"] = pd.to_datetime(h[dc], dayfirst=True, errors="coerce")
         h = h.dropna(subset=["_dt"])
         if not h.empty:
-            wid  = h.sort_values("_dt").iloc[-1].get("ID_treningu")
-            wk   = h[h["ID_treningu"] == wid]
-            hevy_name = wk.iloc[-1].get("Trening", "Trening siłowy")
-            hevy_date = wk["_dt"].max()
-            hevy_sets = len(wk)
+            wid = h.sort_values("_dt").iloc[-1].get("ID_treningu")
+            wk  = h[h["ID_treningu"] == wid].copy()
+            hevy_name     = wk.iloc[-1].get("Trening", "Trening siłowy")
+            hevy_date     = wk["_dt"].max()
+            hevy_duration = str(wk.iloc[-1].get("Czas_trwania", ""))
             if "Cwiczenie" in wk.columns:
-                hevy_exs = list(wk["Cwiczenie"].dropna().unique())
+                for ex_name, grp in wk.groupby("Cwiczenie", sort=False):
+                    sets  = len(grp)
+                    kgs   = grp["KG"].apply(n).dropna()   if "KG"   in grp.columns else pd.Series(dtype=float)
+                    reps  = grp["Reps"].apply(n).dropna() if "Reps" in grp.columns else pd.Series(dtype=float)
+                    max_kg = kgs.max()  if not kgs.empty  else None
+                    # najlepsza seria = max kg × reps dla tego kg
+                    best_str = ""
+                    if not kgs.empty and not reps.empty:
+                        merged = pd.DataFrame({"kg": kgs, "reps": reps}).dropna()
+                        if not merged.empty:
+                            top = merged.loc[merged["kg"].idxmax()]
+                            best_str = f"{top['kg']:.1f} kg × {int(top['reps'])} reps"
+                    # objętość = Σ(kg × reps)
+                    vol = None
+                    if not kgs.empty and not reps.empty:
+                        merged2 = pd.DataFrame({"kg":kgs,"reps":reps}).dropna()
+                        if not merged2.empty:
+                            vol = (merged2["kg"] * merged2["reps"]).sum()
+                    hevy_ex_rows.append({
+                        "name": ex_name, "sets": sets,
+                        "best": best_str,
+                        "vol":  f"{vol:,.0f} kg".replace(",", " ") if vol else ""
+                    })
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -301,56 +325,138 @@ else:
 st.markdown('<div class="sec">🏋️ Ostatnie treningi</div>', unsafe_allow_html=True)
 c_sila, c_kardio = st.columns(2)
 
+# ── SIŁOWY ────────────────────────────────────────────────────────────────────
 with c_sila:
-    exs_html = "".join(f'<span class="ex-pill">{e}</span>' for e in hevy_exs) if hevy_exs else '<span style="color:#bbb">brak danych</span>'
-    d_sila   = hevy_date.strftime("%d.%m.%Y") if hevy_date else "—"
-    sets_str = f'<div style="margin-top:.7rem"><span class="stat-pill">📊 {hevy_sets} serii</span></div>' if hevy_sets else ""
-    st.markdown(f"""
-    <div class="card">
-      <div class="card-title">💪 Ostatni trening siłowy</div>
-      <div class="card-name">{hevy_name or '—'}</div>
-      <div class="card-date">{d_sila}</div>
-      <div>{exs_html}</div>
-      {sets_str}
-    </div>
-    """, unsafe_allow_html=True)
+    d_sila = hevy_date.strftime("%d.%m.%Y") if hevy_date else "—"
+    total_sets = sum(e["sets"] for e in hevy_ex_rows)
+    total_vol  = sum(
+        float(e["vol"].replace(" ","").replace("kg",""))
+        for e in hevy_ex_rows if e["vol"]
+    ) if hevy_ex_rows else 0
 
+    if hevy_ex_rows:
+        ex_rows_html = ""
+        for e in hevy_ex_rows:
+            ex_rows_html += f"""
+            <tr>
+              <td style="font-weight:600;color:#111">{e['name']}</td>
+              <td style="color:#555;text-align:center">{e['sets']} serie</td>
+              <td style="color:#4F46E5;font-weight:600">{e['best']}</td>
+              <td style="color:#888">{e['vol']}</td>
+            </tr>"""
+        dur_str = f"· ⏱ {hevy_duration}" if hevy_duration else ""
+        vol_str = f"{total_vol:,.0f} kg".replace(",", " ") if total_vol else "—"
+        st.markdown(f"""
+        <div class="card">
+          <div class="card-title">💪 Ostatni trening siłowy</div>
+          <div class="card-name">{hevy_name or '—'}</div>
+          <div class="card-date">{d_sila} {dur_str}</div>
+          <div style="display:flex;gap:.5rem;margin:.5rem 0">
+            <span class="stat-pill">📊 {total_sets} serii</span>
+            <span class="stat-pill">🏋️ {vol_str} objętość</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse;margin-top:.6rem">
+            <thead>
+              <tr style="font-size:.7rem;color:#aaa;text-transform:uppercase;letter-spacing:.05em">
+                <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #eee">Ćwiczenie</th>
+                <th style="text-align:center;padding:4px 6px;border-bottom:1px solid #eee">Serie</th>
+                <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #eee">Najlepsza seria</th>
+                <th style="text-align:left;padding:4px 6px;border-bottom:1px solid #eee">Objętość</th>
+              </tr>
+            </thead>
+            <tbody style="font-size:.85rem">{ex_rows_html}</tbody>
+          </table>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="card"><div class="card-title">💪 Ostatni trening siłowy</div><div style="color:#bbb;margin-top:.5rem">Brak danych</div></div>', unsafe_allow_html=True)
+
+# ── KARDIO ─────────────────────────────────────────────────────────────────────
 with c_kardio:
     if last_cardio is not None:
-        kname  = last_cardio.get("Nazwa", "Aktywność")
-        kdist  = n(last_cardio.get("Dystans_km"))
-        kczas  = last_cardio.get("Czas", "")
-        khr    = n(last_cardio.get("HR_sr"))
-        ktempo = last_cardio.get("Tempo_sr", "")
-        kvo2   = n(last_cardio.get("VO2max"))
+        kname   = last_cardio.get("Nazwa", "Aktywność")
+        ktyp    = str(last_cardio.get("Typ", "")).lower()
+        kdist   = n(last_cardio.get("Dystans_km"))
+        kczas   = last_cardio.get("Czas", "")
+        khr     = n(last_cardio.get("HR_sr"))
+        khrmax  = n(last_cardio.get("HR_max"))
+        ktempo  = last_cardio.get("Tempo_sr", "")
+        ktgap   = last_cardio.get("Tempo_GAP", "")
+        ktbest  = last_cardio.get("Tempo_najlepsze", "")
+        kwznios = n(last_cardio.get("Wznios_m"))
+        kspadek = n(last_cardio.get("Spadek_m"))
+        kkal    = n(last_cardio.get("Kalorie"))
+        kvo2    = n(last_cardio.get("VO2max"))
+        kmoc    = n(last_cardio.get("Moc_sr_W"))
+        kkad    = n(last_cardio.get("Kadencja_sr_spm"))
+        keff_a  = n(last_cardio.get("Efekt_aerobowy"))
+        keff_b  = n(last_cardio.get("Efekt_beztlenowy"))
+        kstam   = n(last_cardio.get("Stamina_koniec_pct"))
+        ktemp   = n(last_cardio.get("Temperatura_sr"))
         try:
             kdate = pd.to_datetime(last_cardio.get("_dt") or last_cardio.get("Data")).strftime("%d.%m.%Y")
         except:
             kdate = "—"
 
-        pills = []
-        if kdist:  pills.append(f"📍 {kdist:.2f} km")
-        if kczas:  pills.append(f"⏱ {kczas}")
-        if ktempo: pills.append(f"🏃 {ktempo} /km")
-        if khr:    pills.append(f"❤️ {khr:.0f} bpm")
-        if kvo2:   pills.append(f"🫁 VO2max {kvo2:.0f}")
-        pills_html = "".join(f'<span class="stat-pill">{p}</span>' for p in pills)
+        is_run = ktyp in {"running","treadmill_running","trail_running"}
+
+        def pill(icon, val, suf=""):
+            return f'<span class="stat-pill">{icon} {val}{suf}</span>' if val else ""
+
+        # Główne metryki
+        main_pills = ""
+        if kdist:   main_pills += pill("📍", f"{kdist:.2f}", " km")
+        if kczas:   main_pills += pill("⏱", kczas)
+        if kkal:    main_pills += pill("🔥", f"{kkal:.0f}", " kcal")
+
+        # Tempo (tylko bieg/chód)
+        tempo_pills = ""
+        if is_run:
+            if ktempo: tempo_pills += pill("🏃", ktempo, " /km")
+            if ktgap:  tempo_pills += pill("⛰️ GAP", ktgap, " /km")
+            if ktbest: tempo_pills += pill("⚡", ktbest, " /km best")
+
+        # HR
+        hr_pills = ""
+        if khr:    hr_pills += pill("❤️ avg", f"{khr:.0f}", " bpm")
+        if khrmax: hr_pills += pill("❤️ max", f"{khrmax:.0f}", " bpm")
+
+        # Dynamika (bieg) / Moc (rower)
+        dyn_pills = ""
+        if kkad:   dyn_pills += pill("🦵 kadencja", f"{kkad:.0f}", " spm")
+        if kmoc:   dyn_pills += pill("⚡ moc", f"{kmoc:.0f}", " W")
+
+        # Teren
+        ter_pills = ""
+        if kwznios: ter_pills += pill("⬆️", f"{kwznios:.0f}", " m")
+        if kspadek: ter_pills += pill("⬇️", f"{kspadek:.0f}", " m")
+        if ktemp:   ter_pills += pill("🌡️", f"{ktemp:.0f}", "°C")
+
+        # Efekty treningowe
+        eff_pills = ""
+        if keff_a:  eff_pills += pill("🫀 aerobowy", f"{keff_a:.1f}")
+        if keff_b:  eff_pills += pill("💥 beztlenowy", f"{keff_b:.1f}")
+        if kvo2:    eff_pills += pill("🫁 VO2max", f"{kvo2:.0f}")
+        if kstam:   eff_pills += pill("🔋 stamina", f"{kstam:.0f}", "%")
+
+        def row_section(label, html):
+            return f'<div style="margin:.5rem 0 .2rem;font-size:.7rem;color:#aaa;text-transform:uppercase;letter-spacing:.06em">{label}</div><div class="card-stats">{html}</div>' if html.strip() else ""
 
         st.markdown(f"""
         <div class="card">
           <div class="card-title">🏃 Ostatni trening kardio</div>
           <div class="card-name">{kname}</div>
           <div class="card-date">{kdate}</div>
-          <div class="card-stats">{pills_html}</div>
+          <div class="card-stats">{main_pills}</div>
+          {row_section("Tempo", tempo_pills)}
+          {row_section("Tętno", hr_pills)}
+          {row_section("Dynamika", dyn_pills)}
+          {row_section("Teren", ter_pills)}
+          {row_section("Efekty treningowe", eff_pills)}
         </div>
         """, unsafe_allow_html=True)
     else:
-        st.markdown("""
-        <div class="card">
-          <div class="card-title">🏃 Ostatni trening kardio</div>
-          <div style="color:#bbb;margin-top:.5rem">Brak danych</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="card"><div class="card-title">🏃 Ostatni trening kardio</div><div style="color:#bbb;margin-top:.5rem">Brak danych</div></div>', unsafe_allow_html=True)
 
 
 
