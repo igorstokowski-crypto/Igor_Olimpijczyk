@@ -35,17 +35,17 @@ st.markdown("""
     margin-bottom: 0;
   }
   .hero-photo {
-    width: 130px; height: 130px; border-radius: 50%;
+    width: 180px; height: 180px; border-radius: 50%;
     object-fit: cover; object-position: top;
-    border: 4px solid rgba(255,255,255,.15);
-    box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    border: 4px solid rgba(255,255,255,.2);
+    box-shadow: 0 8px 40px rgba(0,0,0,.5);
     flex-shrink: 0;
   }
   .hero-photo-placeholder {
-    width: 130px; height: 130px; border-radius: 50%;
+    width: 180px; height: 180px; border-radius: 50%;
     background: rgba(255,255,255,.08); display: flex;
     align-items: center; justify-content: center;
-    font-size: 3rem; flex-shrink: 0;
+    font-size: 4rem; flex-shrink: 0;
   }
   .hero-name { font-size: 2.4rem; font-weight: 900; color: #fff; line-height: 1.1; }
   .hero-sub  { font-size: .9rem; color: rgba(255,255,255,.45); margin-top: .2rem; }
@@ -363,7 +363,7 @@ if fit_row is not None:
 
 
 # ── Co jadłem ─────────────────────────────────────────────────────────────────
-st.markdown('<div class="sec">🛒 Co jadłem wczoraj</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="sec">🛒 Co jadłem {fitatu_lbl}</div>', unsafe_allow_html=True)
 
 if not prods.empty:
     # kolumny po pozycji: A=data(0), B=produkt(1), C+(2+) = opcjonalne (gramy, kcal itd.)
