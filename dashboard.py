@@ -122,22 +122,26 @@ sleep_h     = n(row_yd.get("Sen_h"))             if row_yd is not None else None
 sleep_score = n(row_yd.get("Jakos_snu"))         if row_yd is not None else None
 dist_day    = n(row_yd.get("Dystans_dzienny_km")) if row_yd is not None else None
 
-# Fitatu — weź ostatni dostępny dzień (A=Data, B=Kcal)
+# Fitatu — A=Data, B=Kcal — czytaj po pozycji kolumny, nie po nazwie
 fit_row, kcal_eaten, fit_date_used = None, None, yday
+_fit_debug = ""
 
-if not df_fit.empty and "Data" in df_fit.columns:
+if not df_fit.empty:
     df_fit2 = df_fit.copy()
-    df_fit2["_dt"] = pd.to_datetime(df_fit2["Data"].str.strip().str[:10], errors="coerce")
+    # kolumna A to zawsze indeks 0 (data), kolumna B to indeks 1 (kcal)
+    col_date = df_fit2.columns[0]
+    col_kcal = df_fit2.columns[1] if len(df_fit2.columns) > 1 else None
+    _fit_debug = f"cols={list(df_fit2.columns)}, rows={len(df_fit2)}, last={df_fit2[col_date].iloc[-1] if not df_fit2.empty else '?'}"
+    df_fit2["_dt"] = pd.to_datetime(df_fit2[col_date].astype(str).str.strip().str[:10], errors="coerce")
     df_fit2 = df_fit2.dropna(subset=["_dt"]).sort_values("_dt")
     if not df_fit2.empty:
-        # Preferuj wczoraj, w przeciwnym razie ostatni dostępny
         r = df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == yday]
         if r.empty:
             r = df_fit2.iloc[[-1]]
-        fit_row      = r.iloc[-1]
+        fit_row       = r.iloc[-1]
         fit_date_used = fit_row["_dt"].strftime("%Y-%m-%d")
-        # kolumna B = Kcal (fallback po indeksie jeśli nazwa nie pasuje)
-        kcal_eaten   = n(fit_row.get("Kcal")) or n(fit_row.iloc[1] if len(fit_row) > 1 else None)
+        if col_kcal:
+            kcal_eaten = n(fit_row[col_kcal])
 
 # Products
 prods = pd.DataFrame()
@@ -223,9 +227,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("👟 Kroki",        fmt(steps, "", 0)       if steps else "—")
+c1.metric("👟 Kroki",        fmt(steps, "", 0) if steps else "—")
 c2.metric("🔥 Spalone",      fmt(kcal_burned, " kcal", 0))
-c3.metric("🥗 Spożyte",      fmt(kcal_eaten,  " kcal", 0))
+c3.metric("🥗 Spożyte",      fmt(kcal_eaten,  " kcal", 0) if kcal_eaten else "—")
 
 if balance is not None:
     lbl   = "📉 Deficyt" if balance > 0 else "📈 Nadwyżka"
@@ -234,13 +238,22 @@ if balance is not None:
 else:
     c4.metric("⚡ Bilans", "—")
 
+# debug Fitatu (tymczasowe — usuniemy jak zadziała)
+with st.expander("🔍 Debug Fitatu", expanded=False):
+    st.write(f"yday={yday}, fit_date_used={fit_date_used}, kcal_eaten={kcal_eaten}")
+    st.write(f"df_fit info: {_fit_debug}")
+    st.dataframe(df_fit.head(5))
 
 # ── Makra ─────────────────────────────────────────────────────────────────────
 if fit_row is not None:
+    col_b = df_fit.columns[1] if len(df_fit.columns) > 1 else "Kcal"
+    col_p = df_fit.columns[2] if len(df_fit.columns) > 2 else "Bialko_g"
+    col_t = df_fit.columns[3] if len(df_fit.columns) > 3 else "Tluszcze_g"
+    col_w = df_fit.columns[4] if len(df_fit.columns) > 4 else "Wegle_g"
     c1, c2, c3 = st.columns(3)
-    c1.metric("🥩 Białko",      fmt(n(fit_row.get("Bialko_g")),  " g", 0))
-    c2.metric("🧈 Tłuszcze",    fmt(n(fit_row.get("Tluszcze_g")), " g", 0))
-    c3.metric("🍞 Węglowodany", fmt(n(fit_row.get("Wegle_g")),   " g", 0))
+    c1.metric("🥩 Białko",      fmt(n(fit_row.get(col_p)),  " g", 0))
+    c2.metric("🧈 Tłuszcze",    fmt(n(fit_row.get(col_t)), " g", 0))
+    c3.metric("🍞 Węglowodany", fmt(n(fit_row.get(col_w)),   " g", 0))
 
 
 # ── Co jadłem ─────────────────────────────────────────────────────────────────
