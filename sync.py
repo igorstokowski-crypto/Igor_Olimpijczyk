@@ -1039,6 +1039,48 @@ def build_analytics(sheets) -> dict[str, pd.DataFrame]:
     return result
 
 
+def save_analytics_to_sheets(sheets, analytics: dict[str, pd.DataFrame]):
+    """
+    Zapisuje arkusze analityczne do Google Sheets.
+    Każdy DataFrame → osobna zakładka (całkowity nadpis: usuń + wstaw nowe dane).
+    """
+    for tab_name, df in analytics.items():
+        if df.empty:
+            print(f"  {tab_name}: brak danych — pominięto")
+            continue
+        try:
+            # Wypełnij NaN pustymi stringami, konwertuj wszystko na string
+            df_clean = df.fillna("").astype(str)
+            header = [list(df_clean.columns)]
+            rows   = df_clean.values.tolist()
+            values = header + rows
+
+            # Sprawdź czy zakładka istnieje — jeśli nie, utwórz
+            meta = sheets.get(spreadsheetId=SPREADSHEET_ID).execute()
+            existing_titles = [s["properties"]["title"] for s in meta.get("sheets", [])]
+
+            if tab_name not in existing_titles:
+                sheets.batchUpdate(
+                    spreadsheetId=SPREADSHEET_ID,
+                    body={"requests": [{"addSheet": {"properties": {"title": tab_name}}}]}
+                ).execute()
+
+            # Wyczyść zawartość i wstaw świeże dane
+            sheets.values().clear(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f"'{tab_name}'!A:ZZ"
+            ).execute()
+            sheets.values().update(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f"'{tab_name}'!A1",
+                valueInputOption="USER_ENTERED",
+                body={"values": values}
+            ).execute()
+            print(f"  ✓ {tab_name}: {len(rows)} wierszy → Google Sheets")
+        except Exception as e:
+            print(f"  ⚠️ {tab_name}: błąd zapisu do Sheets — {e}")
+
+
 def save_local(datasets: list[tuple[str, list, list]], sheets=None):
     OUTPUT_DIR.mkdir(exist_ok=True)
     xlsx_path = OUTPUT_DIR / "sync_data.xlsx"
@@ -1050,6 +1092,7 @@ def save_local(datasets: list[tuple[str, list, list]], sheets=None):
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
         # Arkusze analityczne — czytamy pełną historię z Google Sheets
+        analytics = {}
         if sheets is not None:
             try:
                 import traceback
@@ -1057,12 +1100,13 @@ def save_local(datasets: list[tuple[str, list, list]], sheets=None):
                 for aname, adf in analytics.items():
                     if not adf.empty:
                         adf.to_excel(writer, sheet_name=aname, index=False)
-                print(f"  ✓ Analiza: {', '.join(analytics.keys())}")
+                print(f"  ✓ Analiza Excel: {', '.join(analytics.keys())}")
             except Exception as e:
                 traceback.print_exc()
                 print(f"  ⚠️ Błąd analizy: {e}")
 
     print(f"  📁 {xlsx_path.name}  +  {len(datasets)}x .csv  →  /{OUTPUT_DIR.name}/")
+    return analytics  # zwróć żeby main mógł zapisać do Sheets
 
 # ── GŁÓWNA LOGIKA ─────────────────────────────────────
 def main():
@@ -1220,7 +1264,7 @@ def main():
 
     # ── EKSPORT LOKALNY ───────────────────────────────
     print("\n─── EKSPORT LOKALNY ──────────────────────────────")
-    save_local([
+    analytics = save_local([
         ("Dziennik",       new["Dziennik"],       DZIENNIK_COLS),
         ("Aktywności",     new["Aktywności"],      AKTYWNOSCI_COLS),
         ("Okrążenia",      new["Okrążenia"],       OKRAZENIA_COLS),
@@ -1229,6 +1273,11 @@ def main():
         ("Hevy",           new["Hevy"],            HEVY_COLS),
         ("Trasy",          new["Trasy"],           TRASY_COLS),
     ], sheets=sheets)
+
+    # ── ANALITYKA → GOOGLE SHEETS ─────────────────────
+    if analytics:
+        print("\n─── ANALITYKA → GOOGLE SHEETS ────────────────────")
+        save_analytics_to_sheets(sheets, analytics)
 
     # ── ZAPISZ DATĘ SYNC ──────────────────────────────
     today_str = datetime.date.today().isoformat()
