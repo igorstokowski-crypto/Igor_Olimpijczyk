@@ -112,7 +112,7 @@ def _svc():
         creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
     return build("sheets", "v4", credentials=creds).spreadsheets()
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def sheet(tab: str) -> pd.DataFrame:
     try:
         rows = _svc().values().get(

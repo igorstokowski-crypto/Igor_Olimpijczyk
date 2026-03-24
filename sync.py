@@ -17,7 +17,9 @@ Uruchomienie:
   python sync.py
 """
 
-import os, json, datetime, time, base64
+import sys, os, json, datetime, time, base64
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -708,7 +710,7 @@ def main():
         last_sync = START_DATE
         print(f"Pierwsza sync od: {last_sync}")
     dates = get_dates(last_sync)
-    print(f"Zakres: {dates[0]} → {dates[-1]}  ({len(dates)} dni)\n")
+    print(f"Zakres: {dates[0]} - {dates[-1]}  ({len(dates)} dni)\n")
 
     # Google Sheets — upewnij się że wszystkie zakładki istnieją
     sheets = get_sheets()
