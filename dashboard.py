@@ -268,11 +268,6 @@ if balance is not None:
 else:
     c4.metric("⚡ Bilans", "—")
 
-# debug Fitatu (tymczasowe — usuniemy jak zadziała)
-with st.expander("🔍 Debug Fitatu", expanded=False):
-    st.write(f"yday={yday}, fit_date_used={fit_date_used}, kcal_eaten={kcal_eaten}")
-    st.write(f"df_fit info: {_fit_debug}")
-    st.dataframe(df_fit.head(5))
 
 # ── Makra ─────────────────────────────────────────────────────────────────────
 if fit_row is not None:
