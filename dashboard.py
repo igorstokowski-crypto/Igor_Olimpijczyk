@@ -275,6 +275,7 @@ if fit_row is not None:
     col_p = df_fit.columns[2] if len(df_fit.columns) > 2 else "Bialko_g"
     col_t = df_fit.columns[3] if len(df_fit.columns) > 3 else "Tluszcze_g"
     col_w = df_fit.columns[4] if len(df_fit.columns) > 4 else "Wegle_g"
+    st.markdown('<div class="sec">🥗 Makro</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     c1.metric("🥩 Białko",      fmt(n(fit_row.get(col_p)),  " g", 0))
     c2.metric("🧈 Tłuszcze",    fmt(n(fit_row.get(col_t)), " g", 0))
