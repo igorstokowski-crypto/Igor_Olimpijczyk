@@ -2,7 +2,7 @@ name: Health Sync
 
 on:
   schedule:
-    - cron: '0 * * * *'   # co godzinę
+    - cron: '0 6,9,12,15,18,20 * * *'   # co 3h od 8:00 do 22:00 (UTC+2)
   workflow_dispatch:        # ręczne odpalenie z GitHub UI
 
 jobs:
