@@ -136,7 +136,8 @@ def fmt(v, suf="", dec=0):
     if v is None: return "—"
     return f"{v:,.{dec}f}{suf}".replace(",", " ")
 
-yday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+today = date.today().strftime("%Y-%m-%d")
+yday  = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 # ── Load ───────────────────────────────────────────────────────────────────────
@@ -151,13 +152,32 @@ with st.spinner(""):
 
 
 # ── Dziennik ───────────────────────────────────────────────────────────────────
-dz, row_yd = pd.DataFrame(), None
+dz, row_td, row_yd = pd.DataFrame(), None, None
 if not df_dz.empty and "Data" in df_dz.columns:
     dz = df_dz.copy()
     dz["Data"] = pd.to_datetime(dz["Data"], errors="coerce")
     dz = dz.sort_values("Data").dropna(subset=["Data"])
-    m = dz["Data"].dt.strftime("%Y-%m-%d") == yday
-    row_yd = dz[m].iloc[-1] if m.any() else None
+    m_td = dz["Data"].dt.strftime("%Y-%m-%d") == today
+    m_yd = dz["Data"].dt.strftime("%Y-%m-%d") == yday
+    row_td = dz[m_td].iloc[-1] if m_td.any() else None
+    row_yd = dz[m_yd].iloc[-1] if m_yd.any() else None
+
+# Dziś jako priorytet, wczoraj jako fallback
+def pick(col, today_row, yday_row):
+    v = n(today_row.get(col)) if today_row is not None else None
+    if v is None or v == 0.0:
+        v = n(yday_row.get(col)) if yday_row is not None else None
+    return v
+
+def pick_row():
+    """Zwraca (row, label) — dziś jeśli ma dane, inaczej wczoraj"""
+    if row_td is not None and n(row_td.get("Kroki", 0) or 0):
+        return row_td, "dziś"
+    if row_yd is not None:
+        return row_yd, "wczoraj"
+    return None, "—"
+
+active_row, active_label = pick_row()
 
 # weight — z arkusza General, komórka E2 (Current Weight)
 latest_weight = None
@@ -169,28 +189,29 @@ try:
 except Exception:
     pass
 
-steps       = n(row_yd.get("Kroki"))             if row_yd is not None else None
-kcal_burned = n(row_yd.get("Kalorie_calkowite")) if row_yd is not None else None
-sleep_h     = n(row_yd.get("Sen_h"))             if row_yd is not None else None
-sleep_score = n(row_yd.get("Jakos_snu"))         if row_yd is not None else None
-dist_day    = n(row_yd.get("Dystans_dzienny_km")) if row_yd is not None else None
+# Sen z dziś (Garmin zapisuje sen nocy pod datą przebudzenia = dziś rano)
+# Kroki/kalorie z dziś jeśli są, inaczej wczoraj
+sleep_h     = n(row_td.get("Sen_h"))     if row_td is not None else n(row_yd.get("Sen_h")     if row_yd is not None else None)
+sleep_score = n(row_td.get("Jakos_snu")) if row_td is not None else n(row_yd.get("Jakos_snu") if row_yd is not None else None)
+steps       = n(active_row.get("Kroki"))              if active_row is not None else None
+kcal_burned = n(active_row.get("Kalorie_calkowite"))  if active_row is not None else None
+dist_day    = n(active_row.get("Dystans_dzienny_km")) if active_row is not None else None
 
-# Fitatu — A=Data, B=Kcal — czytaj po pozycji kolumny, nie po nazwie
-fit_row, kcal_eaten, fit_date_used = None, None, yday
-_fit_debug = ""
+# Fitatu — A=Data, B=Kcal — priorytet: dziś → wczoraj → ostatni dostępny
+fit_row, kcal_eaten, fit_date_used = None, None, today
 
 if not df_fit.empty:
     df_fit2 = df_fit.copy()
-    # kolumna A to zawsze indeks 0 (data), kolumna B to indeks 1 (kcal)
     col_date = df_fit2.columns[0]
     col_kcal = df_fit2.columns[1] if len(df_fit2.columns) > 1 else None
-    _fit_debug = f"cols={list(df_fit2.columns)}, rows={len(df_fit2)}, last={df_fit2[col_date].iloc[-1] if not df_fit2.empty else '?'}"
     df_fit2["_dt"] = pd.to_datetime(df_fit2[col_date].astype(str).str.strip().str[:10], errors="coerce")
     df_fit2 = df_fit2.dropna(subset=["_dt"]).sort_values("_dt")
     if not df_fit2.empty:
-        r = df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == yday]
+        r = df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == today]   # dziś
         if r.empty:
-            r = df_fit2.iloc[[-1]]
+            r = df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == yday]  # wczoraj
+        if r.empty:
+            r = df_fit2.iloc[[-1]]                                        # ostatni dostępny
         fit_row       = r.iloc[-1]
         fit_date_used = fit_row["_dt"].strftime("%Y-%m-%d")
         if col_kcal:
@@ -311,8 +332,10 @@ st.markdown('<div class="main-pad">', unsafe_allow_html=True)
 
 # ── Kalorie ───────────────────────────────────────────────────────────────────
 fit_date_label    = datetime.strptime(fit_date_used, "%Y-%m-%d").strftime("%d.%m.%Y") if fit_date_used else "—"
-garmin_date_label = (date.today()-timedelta(days=1)).strftime("%d.%m.%Y")
-st.markdown(f'<div class="sec">🔥 Kalorie — Garmin: {garmin_date_label} · Fitatu: {fit_date_label}</div>', unsafe_allow_html=True)
+garmin_date_label = datetime.strptime(active_row.get("Data","") if active_row is not None else yday, "%Y-%m-%d").strftime("%d.%m.%Y") if active_row is not None else "—"
+garmin_lbl        = "dziś" if (active_row is not None and active_row.get("Data","")[:10] == today) else "wczoraj"
+fitatu_lbl        = "dziś" if fit_date_used == today else "wczoraj"
+st.markdown(f'<div class="sec">🔥 Kalorie — Garmin: {garmin_date_label} ({garmin_lbl}) · Fitatu: {fit_date_label} ({fitatu_lbl})</div>', unsafe_allow_html=True)
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("🔥 Spalone",  fmt(kcal_burned, " kcal", 0))
 c2.metric("🥗 Spożyte",  fmt(kcal_eaten,  " kcal", 0) if kcal_eaten else "—")
