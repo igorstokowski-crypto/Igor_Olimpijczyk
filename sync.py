@@ -998,7 +998,8 @@ def build_analytics(sheets) -> dict[str, pd.DataFrame]:
         rekordy_rows.append(("", "", "", ""))
         rekordy_rows.append(("SIŁOWNIA — REKORDY (max ciężar per ćwiczenie)", "", "", ""))
 
-        top_cwiczenia = df_hevy.groupby("Cwiczenie")["KG"].max().sort_values(ascending=False).head(15)
+        top_cwiczenia = df_hevy.groupby("Cwiczenie")["KG"].max().dropna()
+        top_cwiczenia = top_cwiczenia[top_cwiczenia > 0].sort_values(ascending=False)
         for cwicz, max_kg in top_cwiczenia.items():
             row_best = df_hevy[(df_hevy["Cwiczenie"] == cwicz) & (df_hevy["KG"] == max_kg)].iloc[0]
             dc = "Data_start" if "Data_start" in df_hevy.columns else "Data"

@@ -880,7 +880,12 @@ with tab_rekordy:
             hv["Reps"] = hv["Reps"].apply(n) if "Reps" in hv.columns else 0
             hv = hv.dropna(subset=["KG"])
             hv = hv[hv["KG"] > 0]
-            top = hv.groupby("Cwiczenie")["KG"].max().sort_values(ascending=False).head(15)
+            top = hv.groupby("Cwiczenie")["KG"].max().dropna()
+            top = top[top > 0].sort_values(ascending=False)
+            # Szukaj w polu tekstowym
+            search = st.text_input("🔍 Szukaj ćwiczenia", placeholder="np. Bench Press...", key="rec_search")
+            if search:
+                top = top[top.index.str.lower().str.contains(search.lower())]
             html = ""
             for cwicz, max_kg in top.items():
                 best = hv[(hv["Cwiczenie"] == cwicz) & (hv["KG"] == max_kg)].iloc[0]
@@ -890,7 +895,7 @@ with tab_rekordy:
                 html += f"""<div class="rec-row">
                   <div><div class="rec-name">{cwicz}</div><div class="rec-meta">{date_str}</div></div>
                   <div class="rec-val">{max_kg:.1f} kg {reps_str}</div></div>"""
-            st.markdown(f'<div class="card">{html}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card" style="max-height:520px;overflow-y:auto">{html}</div>', unsafe_allow_html=True)
             # Podsumowanie
             st.markdown('<div style="height:.5rem"></div>', unsafe_allow_html=True)
             sh1, sh2 = st.columns(2)
