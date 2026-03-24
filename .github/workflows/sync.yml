@@ -25,7 +25,9 @@ jobs:
 
       - name: Przywróć sesję Garmin
         run: |
-          echo "${{ secrets.GARTH_SESSION }}" | base64 -d | tar -xz
+          printf '%s' '${{ secrets.GARTH_SESSION }}' | base64 -d | tar -xz
+          echo "=== Pliki w SESJA_GARTH ==="
+          ls -la SESJA_GARTH/ || echo "BRAK folderu SESJA_GARTH"
 
       - name: Utwórz .env
         run: |
