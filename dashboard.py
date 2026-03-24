@@ -5,6 +5,7 @@ dashboard.py — Personal health dashboard for Igor
 
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from datetime import date, datetime, timedelta
@@ -460,6 +461,228 @@ with c_kardio:
 
 
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  HISTORIA
+# ══════════════════════════════════════════════════════════════════════════════
+
+CHART_H = 300
+DAYS_DEFAULT = 30
+
+def sparkline_layout(fig, title=""):
+    fig.update_layout(
+        height=CHART_H, margin=dict(l=0, r=0, t=28, b=0),
+        plot_bgcolor="white", paper_bgcolor="white",
+        showlegend=True, legend=dict(orientation="h", y=1.15, x=0),
+        hovermode="x unified",
+        title=dict(text=title, font=dict(size=12, color="#888"), x=0),
+        xaxis=dict(showgrid=False, tickformat="%d.%m", tickfont=dict(size=10)),
+        yaxis=dict(gridcolor="#f5f5f5", tickfont=dict(size=10)),
+    )
+    return fig
+
+# ── Przygotuj historyczne dane Dziennik ──────────────────────────────────────
+hist_dz = pd.DataFrame()
+if not dz.empty:
+    hist_dz = dz.copy()
+    for col in ["Kroki", "Kalorie_calkowite", "Kalorie_aktywne"]:
+        if col in hist_dz.columns:
+            hist_dz[col] = hist_dz[col].apply(n)
+    hist_dz = hist_dz.sort_values("Data")
+
+# ── Przygotuj historyczne dane Fitatu ────────────────────────────────────────
+hist_fit = pd.DataFrame()
+if not df_fit.empty:
+    hf = df_fit.copy()
+    hf.columns = [c.strip() for c in hf.columns]
+    col_d = hf.columns[0]
+    col_k = hf.columns[1] if len(hf.columns) > 1 else None
+    col_b = hf.columns[2] if len(hf.columns) > 2 else None
+    col_t = hf.columns[3] if len(hf.columns) > 3 else None
+    col_w = hf.columns[4] if len(hf.columns) > 4 else None
+    hf["_dt"] = pd.to_datetime(hf[col_d].astype(str).str.strip().str[:10], errors="coerce")
+    hf = hf.dropna(subset=["_dt"]).sort_values("_dt")
+    hist_fit = hf.rename(columns={
+        col_d: "Data", col_k: "Kcal",
+        **({"Bialko_g": col_b} if col_b else {}),
+        **({"Tluszcze_g": col_t} if col_t else {}),
+        **({"Wegle_g": col_w} if col_w else {}),
+    })
+    if col_k: hist_fit["Kcal"]      = hist_fit["Kcal"].apply(n)
+    if col_b: hist_fit[col_b]       = hist_fit[col_b].apply(n)
+    if col_t: hist_fit[col_t]       = hist_fit[col_t].apply(n)
+    if col_w: hist_fit[col_w]       = hist_fit[col_w].apply(n)
+    hist_fit["_dt"] = hf["_dt"]
+
+# Połącz Dziennik + Fitatu po dacie → bilans kalorii
+hist_bal = pd.DataFrame()
+if not hist_dz.empty and not hist_fit.empty and "Kalorie_calkowite" in hist_dz.columns:
+    left  = hist_dz[["Data", "Kalorie_calkowite"]].copy()
+    left["_key"] = left["Data"].dt.strftime("%Y-%m-%d")
+    right = hist_fit[["_dt", "Kcal"]].copy()
+    right["_key"] = right["_dt"].dt.strftime("%Y-%m-%d")
+    merged = left.merge(right[["_key","Kcal"]], on="_key", how="inner")
+    merged["Bilans"] = merged["Kalorie_calkowite"] - merged["Kcal"]
+    hist_bal = merged.sort_values("Data")
+
+# ── Selektor zakresu ──────────────────────────────────────────────────────────
+st.markdown('<div class="sec">📈 Historia</div>', unsafe_allow_html=True)
+col_r1, col_r2 = st.columns([3, 1])
+with col_r2:
+    days_range = st.selectbox("Zakres", [7, 14, 30, 60, 90, 180, 365], index=2,
+                               format_func=lambda x: f"Ostatnie {x} dni")
+cutoff = pd.Timestamp.now() - timedelta(days=days_range)
+
+# ── 1. Kroki ─────────────────────────────────────────────────────────────────
+if not hist_dz.empty and "Kroki" in hist_dz.columns:
+    df_k = hist_dz[hist_dz["Data"] >= cutoff][["Data","Kroki"]].dropna()
+    if not df_k.empty:
+        target = 10000
+        fig = go.Figure()
+        colors = ["#4F46E5" if v >= target else "#F59E0B" for v in df_k["Kroki"]]
+        fig.add_trace(go.Bar(
+            x=df_k["Data"], y=df_k["Kroki"],
+            marker_color=colors, name="Kroki",
+            hovertemplate="%{x|%d.%m}: <b>%{y:,.0f}</b> kroków<extra></extra>",
+        ))
+        fig.add_hline(y=target, line_dash="dot", line_color="#aaa",
+                      annotation_text="10 000 cel", annotation_position="top right")
+        sparkline_layout(fig, "👟 Historia kroków")
+        st.plotly_chart(fig, use_container_width=True)
+
+# ── 2. Kalorie spalone / spożyte / bilans ────────────────────────────────────
+if not hist_bal.empty:
+    df_b = hist_bal[hist_bal["Data"] >= cutoff].copy()
+    if not df_b.empty:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df_b["Data"], y=df_b["Kalorie_calkowite"],
+            name="🔥 Spalone", mode="lines",
+            line=dict(color="#EF4444", width=2),
+            hovertemplate="%{x|%d.%m}: <b>%{y:,.0f}</b> kcal spalone<extra></extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=df_b["Data"], y=df_b["Kcal"],
+            name="🥗 Spożyte", mode="lines",
+            line=dict(color="#10B981", width=2),
+            hovertemplate="%{x|%d.%m}: <b>%{y:,.0f}</b> kcal spożyte<extra></extra>",
+        ))
+        sparkline_layout(fig, "🔥 Kalorie — spalone vs spożyte")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Bilans (deficyt/nadwyżka) — słupki kolorowe
+        fig2 = go.Figure()
+        bar_colors = ["#10B981" if v >= 0 else "#EF4444" for v in df_b["Bilans"]]
+        fig2.add_trace(go.Bar(
+            x=df_b["Data"], y=df_b["Bilans"],
+            marker_color=bar_colors, name="Bilans",
+            hovertemplate="%{x|%d.%m}: <b>%{y:+,.0f}</b> kcal<extra></extra>",
+        ))
+        fig2.add_hline(y=0, line_color="#888", line_width=1)
+        sparkline_layout(fig2, "📊 Bilans kalorii (+ deficyt / − nadwyżka)")
+        fig2.update_layout(showlegend=False)
+        st.plotly_chart(fig2, use_container_width=True)
+
+# ── 3. Historia makro ─────────────────────────────────────────────────────────
+if not hist_fit.empty:
+    col_b2 = df_fit.columns[2] if len(df_fit.columns) > 2 else None
+    col_t2 = df_fit.columns[3] if len(df_fit.columns) > 3 else None
+    col_w2 = df_fit.columns[4] if len(df_fit.columns) > 4 else None
+    if col_b2 and col_t2 and col_w2:
+        df_m = hist_fit[hist_fit["_dt"] >= cutoff].copy()
+        df_m = df_m.rename(columns={col_b2: "Bialko", col_t2: "Tluszcze", col_w2: "Wegle"})
+        if not df_m.empty:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df_m["_dt"], y=df_m["Bialko"],
+                name="🥩 Białko", mode="lines", stackgroup="one",
+                line=dict(color="#6366F1"), fillcolor="rgba(99,102,241,.25)",
+                hovertemplate="%{x|%d.%m}: <b>%{y:.0f} g</b><extra>Białko</extra>"))
+            fig.add_trace(go.Scatter(x=df_m["_dt"], y=df_m["Tluszcze"],
+                name="🧈 Tłuszcze", mode="lines", stackgroup="one",
+                line=dict(color="#F59E0B"), fillcolor="rgba(245,158,11,.25)",
+                hovertemplate="%{x|%d.%m}: <b>%{y:.0f} g</b><extra>Tłuszcze</extra>"))
+            fig.add_trace(go.Scatter(x=df_m["_dt"], y=df_m["Wegle"],
+                name="🍞 Węgle", mode="lines", stackgroup="one",
+                line=dict(color="#10B981"), fillcolor="rgba(16,185,129,.25)",
+                hovertemplate="%{x|%d.%m}: <b>%{y:.0f} g</b><extra>Węgle</extra>"))
+            sparkline_layout(fig, "🥗 Makro dzienne (g)")
+            st.plotly_chart(fig, use_container_width=True)
+
+# ── 4. Przeglądarka produktów per dzień ──────────────────────────────────────
+st.markdown('<div class="sec">🛒 Co jadłem — historia produktów</div>', unsafe_allow_html=True)
+
+if not df_prod.empty:
+    prod2 = df_prod.copy()
+    col_pd2 = prod2.columns[0]
+    prod2["_dt"] = pd.to_datetime(prod2[col_pd2].astype(str).str.strip().str[:10], errors="coerce")
+    prod2 = prod2.dropna(subset=["_dt"]).sort_values("_dt", ascending=False)
+    available_dates = sorted(prod2["_dt"].dt.date.unique(), reverse=True)
+
+    if available_dates:
+        sel_date = st.selectbox(
+            "Wybierz dzień",
+            available_dates,
+            format_func=lambda d: d.strftime("%A, %d %B %Y"),
+        )
+        day_prods = prod2[prod2["_dt"].dt.date == sel_date].copy()
+        pcols2 = list(day_prods.columns)
+        col_pname = pcols2[1] if len(pcols2) > 1 else pcols2[0]
+        col_pgram = pcols2[2] if len(pcols2) > 2 else None
+        col_pkcal = pcols2[3] if len(pcols2) > 3 else None
+
+        rows_h = ""
+        tot = 0
+        for _, row in day_prods.iterrows():
+            nm = row[col_pname]
+            gr = f"{n(row[col_pgram]):.0f} g" if col_pgram and n(row[col_pgram]) else ""
+            kv = n(row[col_pkcal]) if col_pkcal else None
+            if kv: tot += kv
+            kf = f"{kv:.0f}" if kv else ""
+            rows_h += f"<tr><td style='font-weight:500;color:#111'>{nm}</td><td style='color:#555'>{gr}</td><td style='color:#E05A2B;font-weight:600'>{kf}</td></tr>"
+
+        # Pasek makro dla wybranego dnia
+        fit_day_row = None
+        if not hist_fit.empty:
+            fd = hist_fit[hist_fit["_dt"].dt.date == sel_date]
+            if not fd.empty:
+                fit_day_row = fd.iloc[-1]
+
+        macro_pills = ""
+        if fit_day_row is not None:
+            cb2 = df_fit.columns[1] if len(df_fit.columns) > 1 else None
+            cp2 = df_fit.columns[2] if len(df_fit.columns) > 2 else None
+            ct2 = df_fit.columns[3] if len(df_fit.columns) > 3 else None
+            cw2 = df_fit.columns[4] if len(df_fit.columns) > 4 else None
+            def mp(icon, col):
+                val = n(fit_day_row.get(col)) if col else None
+                return f'<span class="stat-pill">{icon} {val:.0f} g</span>' if val else ""
+            kday = n(fit_day_row.get(cb2)) if cb2 else None
+            macro_pills = f"""
+            <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.8rem">
+              {'<span class="stat-pill">🔥 ' + f"{kday:.0f} kcal</span>" if kday else ""}
+              {mp("🥩 Białko", cp2)}{mp("🧈 Tłuszcze", ct2)}{mp("🍞 Węgle", cw2)}
+            </div>"""
+
+        st.markdown(f"""
+        <div class="card">
+          {macro_pills}
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="font-size:.7rem;color:#aaa;text-transform:uppercase;letter-spacing:.05em">
+                <th style="text-align:left;padding:4px 8px;border-bottom:2px solid #eee">Produkt</th>
+                <th style="text-align:left;padding:4px 8px;border-bottom:2px solid #eee">Gramy</th>
+                <th style="text-align:left;padding:4px 8px;border-bottom:2px solid #eee">Kcal</th>
+              </tr>
+            </thead>
+            <tbody style="font-size:.88rem">{rows_h}</tbody>
+          </table>
+          <div style="margin-top:.7rem;font-size:.82rem;color:#aaa;text-align:right">
+            Łącznie: <b style="color:#E05A2B">{int(tot)} kcal</b> · {len(day_prods)} produktów
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+else:
+    st.markdown('<div style="color:#bbb;font-size:.9rem">Brak danych produktów</div>', unsafe_allow_html=True)
 
 # Footer
 st.divider()
