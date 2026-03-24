@@ -843,6 +843,7 @@ def main():
         ("Fitatu",         new["Fitatu"],          FITATU_COLS),
         ("FitatuProdukty", new["FitatuProdukty"],  FITATU_PROD_COLS),
         ("Hevy",           new["Hevy"],            HEVY_COLS),
+        ("Trasy",          new["Trasy"],           TRASY_COLS),
     ])
 
     # ── ZAPISZ DATĘ SYNC ──────────────────────────────
