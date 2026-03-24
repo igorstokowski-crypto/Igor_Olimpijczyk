@@ -330,6 +330,51 @@ st.markdown(f"""
 # ── MAIN CONTENT wrapper ──────────────────────────────────────────────────────
 st.markdown('<div class="main-pad">', unsafe_allow_html=True)
 
+# ── Podsumowanie miesięczne ───────────────────────────────────────────────────
+_month_start = date.today().replace(day=1).strftime("%Y-%m-%d")
+_month_label = date.today().strftime("%B %Y")
+
+# Kroki w tym miesiącu
+month_steps = 0
+if not dz.empty and "Kroki" in dz.columns:
+    _mdf = dz[dz["Data"].dt.strftime("%Y-%m") == date.today().strftime("%Y-%m")].copy()
+    _mdf["Kroki"] = _mdf["Kroki"].apply(n)
+    month_steps = int(_mdf["Kroki"].dropna().sum())
+
+# Siłownia w tym miesiącu (unikalne dni treningów Hevy)
+month_gym = 0
+if not df_hevy.empty:
+    _hdf = df_hevy.copy()
+    _dc = "Data_start" if "Data_start" in _hdf.columns else "Data"
+    if _dc in _hdf.columns:
+        _hdf["_dt"] = pd.to_datetime(_hdf[_dc], dayfirst=True, errors="coerce")
+        _hdf = _hdf.dropna(subset=["_dt"])
+        _hdf = _hdf[_hdf["_dt"].dt.strftime("%Y-%m") == date.today().strftime("%Y-%m")]
+        month_gym = _hdf["ID_treningu"].nunique() if "ID_treningu" in _hdf.columns else 0
+
+# Kardio w tym miesiącu
+CARDIO_TYPES = {"running","trail_running","treadmill_running","cycling","road_biking",
+                "indoor_cycling","swimming","lap_swimming","open_water_swimming","walking"}
+month_run = month_bike = month_swim = month_walk = 0
+if not df_akt.empty and "Data" in df_akt.columns and "Typ" in df_akt.columns:
+    _adf = df_akt.copy()
+    _adf["_dt"] = pd.to_datetime(_adf["Data"], errors="coerce")
+    _adf = _adf[_adf["_dt"].dt.strftime("%Y-%m") == date.today().strftime("%Y-%m")]
+    _typs = _adf["Typ"].str.lower()
+    month_run  = int(_typs.isin({"running","trail_running","treadmill_running"}).sum())
+    month_bike = int(_typs.isin({"cycling","road_biking","indoor_cycling"}).sum())
+    month_swim = int(_typs.isin({"swimming","lap_swimming","open_water_swimming"}).sum())
+    month_walk = int(_typs.isin({"walking","hiking"}).sum())
+month_kardio = month_run + month_bike + month_swim + month_walk
+
+st.markdown(f'<div class="sec">📅 Podsumowanie — {_month_label}</div>', unsafe_allow_html=True)
+cm1, cm2, cm3, cm4, cm5 = st.columns(5)
+cm1.metric("👟 Kroki w miesiącu",   f"{month_steps:,}".replace(",", " ") if month_steps else "—")
+cm2.metric("💪 Siłownia",           f"{month_gym} razy")
+cm3.metric("🏃 Bieganie",           f"{month_run} razy")
+cm4.metric("🚴 Rower / 🏊 Basen",   f"{month_bike + month_swim} razy")
+cm5.metric("🔥 Kardio łącznie",     f"{month_kardio} razy")
+
 # ── Kalorie ───────────────────────────────────────────────────────────────────
 fit_date_label    = datetime.strptime(fit_date_used, "%Y-%m-%d").strftime("%d.%m.%Y") if fit_date_used else "—"
 _active_date      = pd.Timestamp(active_row["Data"]).strftime("%Y-%m-%d") if active_row is not None else yday

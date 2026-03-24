@@ -695,13 +695,17 @@ def main():
     print("  UNIFIED SYNC — Garmin + Fitatu")
     print("=" * 55)
 
-    # Daty
-    last_sync = START_DATE
-    if LAST_SYNC_FILE.exists():
+    # Daty — w GitHub Actions zawsze ostatnie 7 dni
+    in_ci = os.environ.get("GITHUB_ACTIONS") == "true"
+    if in_ci:
+        last_sync = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+        print(f"GitHub Actions — sync ostatnich 7 dni od: {last_sync}")
+    elif LAST_SYNC_FILE.exists():
         saved = json.loads(LAST_SYNC_FILE.read_text())
         last_sync = saved.get("lastDate", START_DATE)
         print(f"Ostatnia sync: {last_sync}")
     else:
+        last_sync = START_DATE
         print(f"Pierwsza sync od: {last_sync}")
     dates = get_dates(last_sync)
     print(f"Zakres: {dates[0]} → {dates[-1]}  ({len(dates)} dni)\n")
