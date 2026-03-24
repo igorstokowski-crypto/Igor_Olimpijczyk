@@ -521,17 +521,124 @@ def ensure_tabs(sheets, tabs_cols: dict[str, list]):
             ).execute()
             print(f"  📋 Nagłówki dodane: {tab}")
 
-def get_existing_keys(sheets, tab: str) -> set:
+def get_existing_keys(sheets, tab: str) -> dict:
+    """Zwraca {klucz: numer_wiersza} (wiersz 2 = indeks 0)."""
     try:
         res = sheets.values().get(
             spreadsheetId=SPREADSHEET_ID,
             range=f"'{tab}'!A2:A",
         ).execute()
-        return {r[0] for r in (res.get("values") or []) if r}
+        return {r[0]: i + 2 for i, r in enumerate(res.get("values") or []) if r}
     except Exception:
-        return set()
+        return {}
+
+def upsert_to_sheet(sheets, tab: str, cols: list, rows: list[dict]):
+    """Insert nowych wierszy, update istniejących (po kluczu w kolumnie A)."""
+    if not rows:
+        print(f"  {tab}: brak danych")
+        return
+
+    key_to_row = get_existing_keys(sheets, tab)
+    to_insert, batch_data = [], []
+
+    for r in rows:
+        key    = str(r.get(cols[0], ""))
+        values = [str(r.get(c, "")) for c in cols]
+        if key in key_to_row:
+            row_num = key_to_row[key]
+            end_col = chr(ord("A") + len(cols) - 1)
+            batch_data.append({
+                "range":  f"'{tab}'!A{row_num}:{end_col}{row_num}",
+                "values": [values],
+            })
+        else:
+            to_insert.append(values)
+
+    if batch_data:
+        sheets.values().batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={"valueInputOption": "USER_ENTERED", "data": batch_data},
+        ).execute()
+        print(f"  ✓ {tab}: zaktualizowano {len(batch_data)} wierszy")
+
+    if to_insert:
+        sheets.values().append(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"'{tab}'!A2",
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body={"values": to_insert},
+        ).execute()
+        print(f"  ✓ {tab}: +{len(to_insert)} nowych wierszy")
+
+def upsert_multirow(sheets, tab: str, cols: list, rows: list[dict], date_key: str):
+    """
+    Dla zakładek gdzie 1 dzień = wiele wierszy (FitatuProdukty, Okrążenia).
+    Usuwa wszystkie wiersze dla danej daty i wstawia świeże.
+    """
+    if not rows:
+        return
+
+    dates_to_refresh = {str(r.get(date_key, "")) for r in rows}
+
+    # Pobierz wszystkie wiersze żeby znaleźć numery do usunięcia
+    try:
+        res = sheets.values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"'{tab}'!A2:A",
+        ).execute()
+        existing_col_a = res.get("values") or []
+    except Exception:
+        existing_col_a = []
+
+    rows_to_delete = [
+        i + 2  # numer wiersza w Sheets (1-indexed, +1 za nagłówek)
+        for i, r in enumerate(existing_col_a)
+        if r and r[0] in dates_to_refresh
+    ]
+
+    # Usuń od końca (żeby numery się nie przesuwały)
+    if rows_to_delete:
+        requests_list = [
+            {
+                "deleteDimension": {
+                    "range": {
+                        "sheetId":    _get_sheet_id(sheets, tab),
+                        "dimension":  "ROWS",
+                        "startIndex": rn - 1,  # 0-indexed
+                        "endIndex":   rn,
+                    }
+                }
+            }
+            for rn in sorted(rows_to_delete, reverse=True)
+        ]
+        sheets.batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={"requests": requests_list},
+        ).execute()
+        print(f"  {tab}: usunięto {len(rows_to_delete)} starych wierszy")
+
+    # Wstaw świeże
+    values = [[str(r.get(c, "")) for c in cols] for r in rows]
+    sheets.values().append(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{tab}'!A2",
+        valueInputOption="USER_ENTERED",
+        insertDataOption="INSERT_ROWS",
+        body={"values": values},
+    ).execute()
+    print(f"  ✓ {tab}: +{len(rows)} wierszy")
+
+_sheet_id_cache = {}
+def _get_sheet_id(sheets, tab_name: str) -> int:
+    if tab_name not in _sheet_id_cache:
+        meta = sheets.get(spreadsheetId=SPREADSHEET_ID).execute()
+        for s in meta["sheets"]:
+            _sheet_id_cache[s["properties"]["title"]] = s["properties"]["sheetId"]
+    return _sheet_id_cache[tab_name]
 
 def append_to_sheet(sheets, tab: str, cols: list, rows: list[dict]):
+    """Zachowane dla Hevy — tylko nowe (nie nadpisujemy historii treningów)."""
     if not rows:
         print(f"  {tab}: brak nowych danych")
         return
@@ -585,10 +692,16 @@ def main():
         "Hevy":           HEVY_COLS,
     })
 
-    existing = {
-        tab: get_existing_keys(sheets, tab)
-        for tab in ["Dziennik", "Aktywności", "Okrążenia", "Fitatu", "FitatuProdukty", "Hevy"]
-    }
+    existing_hevy = get_existing_keys(sheets, "Hevy")
+    existing_akt  = get_existing_keys(sheets, "Aktywności")
+
+    today     = datetime.date.today().isoformat()
+    yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    # Zawsze odświeżaj dziś i wczoraj; starsze dni — tylko jeśli brak
+    def should_refresh(date_str: str, existing_keys: dict) -> bool:
+        if date_str >= yesterday:   # dziś lub wczoraj — zawsze update
+            return True
+        return date_str not in existing_keys
 
     new = {
         "Dziennik":       [],
@@ -603,17 +716,15 @@ def main():
     print("─── GARMIN ───────────────────────────────────────")
     garmin = garmin_login()
 
-    # Pobierz aktualną wagę z profilu (ustawiana ręcznie w General > Current Weight)
     current_weight = fetch_garmin_current_weight()
-    today = datetime.date.today().isoformat()
     if current_weight:
         print(f"  ⚖️  Aktualna waga z profilu: {current_weight} kg")
 
+    existing_dz = get_existing_keys(sheets, "Dziennik")
     print("\n📅 Dane dzienne...")
     for date_str in dates:
-        if date_str in existing["Dziennik"]:
+        if not should_refresh(date_str, existing_dz):
             continue
-        # Przekaż wagę tylko dla dzisiejszego dnia (żeby nie nadpisywać historii)
         weight_for_day = current_weight if date_str == today else None
         row = fetch_garmin_daily(garmin, date_str, weight_for_day)
         new["Dziennik"].append(row)
@@ -629,8 +740,8 @@ def main():
                 if a.get("activityType", {}).get("typeKey") in ALL_TYPES]
         print(f"  Znaleziono: {len(acts)}")
         for act in acts:
-            if str(act["activityId"]) in existing["Aktywności"]:
-                continue
+            if str(act["activityId"]) in existing_akt:
+                continue  # aktywności się nie zmieniają po zapisie
             act_row, laps = fetch_garmin_activity(garmin, act)
             new["Aktywności"].append(act_row)
             new["Okrążenia"].extend(laps)
@@ -645,16 +756,16 @@ def main():
     print("\n─── FITATU ───────────────────────────────────────")
     token, user_id = fitatu_login()
 
+    existing_fit  = get_existing_keys(sheets, "Fitatu")
+    existing_prod = get_existing_keys(sheets, "FitatuProdukty")
     print("\n🥗 Dane żywieniowe...")
     for date_str in dates:
-        skip_daily    = date_str in existing["Fitatu"]
-        skip_products = date_str in existing["FitatuProdukty"]
-        if skip_daily and skip_products:
+        if not should_refresh(date_str, existing_fit) and not should_refresh(date_str, existing_prod):
             continue
         daily, products = fetch_fitatu_day(token, user_id, date_str)
-        if daily and not skip_daily:
+        if daily and should_refresh(date_str, existing_fit):
             new["Fitatu"].append(daily)
-        if products and not skip_products:
+        if products and should_refresh(date_str, existing_prod):
             new["FitatuProdukty"].extend(products)
         if daily:
             print(f"  {date_str}  {daily['Kcal']} kcal  "
@@ -664,7 +775,7 @@ def main():
     # ── HEVY ──────────────────────────────────────────────
     print("\n─── HEVY ─────────────────────────────────────────")
     print("🏋️  Treningi siłowe...")
-    new["Hevy"] = fetch_hevy_workouts(existing["Hevy"])
+    new["Hevy"] = fetch_hevy_workouts(existing_hevy)
     if new["Hevy"]:
         unique_workouts = len({r["ID_treningu"] for r in new["Hevy"]})
         print(f"  Nowych treningów: {unique_workouts}  ({len(new['Hevy'])} serii)")
@@ -673,12 +784,12 @@ def main():
 
     # ── ZAPIS DO SHEETS ───────────────────────────────
     print("\n─── GOOGLE SHEETS ────────────────────────────────")
-    append_to_sheet(sheets, "Dziennik",       DZIENNIK_COLS,      new["Dziennik"])
-    append_to_sheet(sheets, "Aktywności",     AKTYWNOSCI_COLS,    new["Aktywności"])
-    append_to_sheet(sheets, "Okrążenia",      OKRAZENIA_COLS,     new["Okrążenia"])
-    append_to_sheet(sheets, "Fitatu",         FITATU_COLS,        new["Fitatu"])
-    append_to_sheet(sheets, "FitatuProdukty", FITATU_PROD_COLS,   new["FitatuProdukty"])
-    append_to_sheet(sheets, "Hevy",           HEVY_COLS,          new["Hevy"])
+    upsert_to_sheet(sheets, "Dziennik",       DZIENNIK_COLS,    new["Dziennik"])
+    upsert_to_sheet(sheets, "Aktywności",     AKTYWNOSCI_COLS,  new["Aktywności"])
+    upsert_to_sheet(sheets, "Okrążenia",      OKRAZENIA_COLS,   new["Okrążenia"])
+    upsert_to_sheet(sheets, "Fitatu",         FITATU_COLS,      new["Fitatu"])
+    upsert_multirow(sheets, "FitatuProdukty", FITATU_PROD_COLS, new["FitatuProdukty"], "Data")
+    append_to_sheet(sheets, "Hevy",           HEVY_COLS,        new["Hevy"])
 
     # ── EKSPORT LOKALNY ───────────────────────────────
     print("\n─── EKSPORT LOKALNY ──────────────────────────────")
