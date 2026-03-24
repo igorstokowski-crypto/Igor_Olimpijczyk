@@ -889,7 +889,8 @@ with tab_rekordy:
             html = ""
             for cwicz, max_kg in top.items():
                 best = hv[(hv["Cwiczenie"] == cwicz) & (hv["KG"] == max_kg)].iloc[0]
-                reps_str = f"× {int(best['Reps'])} reps" if best.get("Reps") and n(best.get("Reps")) else ""
+                _rv = n(best.get("Reps"))
+                reps_str = f"× {int(_rv)} reps" if _rv and _rv > 0 else ""
                 dc = "Data_start" if "Data_start" in hv.columns else "Data"
                 date_str = str(best.get(dc,""))[:10]
                 html += f"""<div class="rec-row">
