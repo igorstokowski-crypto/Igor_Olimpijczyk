@@ -22,34 +22,82 @@ st.set_page_config(page_title="Igor · Dashboard", page_icon="🏃", layout="wid
 
 st.markdown("""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
-  html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-  .block-container { padding: 1.5rem 2.5rem 2rem; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+  html, body, [class*="css"] { font-family: 'Inter', sans-serif; background: #F0F2F6; }
+  .block-container { padding: 0 !important; max-width: 100% !important; }
+  section[data-testid="stSidebar"] { display: none; }
 
-  [data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 800; }
-  [data-testid="stMetricLabel"] { font-size: 0.75rem !important; color: #999 !important; text-transform: uppercase; letter-spacing: .07em; }
-  [data-testid="stMetricDelta"] { font-size: 0.82rem !important; }
+  /* ── HERO ── */
+  .hero {
+    background: linear-gradient(135deg, #0F172A 0%, #1E293B 60%, #1e3a5f 100%);
+    padding: 2.5rem 3rem 2rem;
+    display: flex; align-items: center; gap: 2rem;
+    margin-bottom: 0;
+  }
+  .hero-photo {
+    width: 130px; height: 130px; border-radius: 50%;
+    object-fit: cover; object-position: top;
+    border: 4px solid rgba(255,255,255,.15);
+    box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    flex-shrink: 0;
+  }
+  .hero-photo-placeholder {
+    width: 130px; height: 130px; border-radius: 50%;
+    background: rgba(255,255,255,.08); display: flex;
+    align-items: center; justify-content: center;
+    font-size: 3rem; flex-shrink: 0;
+  }
+  .hero-name { font-size: 2.4rem; font-weight: 900; color: #fff; line-height: 1.1; }
+  .hero-sub  { font-size: .9rem; color: rgba(255,255,255,.45); margin-top: .2rem; }
+  .hero-date { font-size: .82rem; color: rgba(255,255,255,.4); margin-top: .5rem; }
+  .hero-stats { display: flex; gap: 2rem; margin-top: 1.2rem; flex-wrap: wrap; }
+  .hero-stat-val  { font-size: 1.6rem; font-weight: 800; color: #fff; }
+  .hero-stat-lbl  { font-size: .7rem; color: rgba(255,255,255,.4); text-transform: uppercase; letter-spacing: .08em; }
 
-  .sec { font-size: 0.78rem; font-weight: 700; color: #aaa; text-transform: uppercase;
-         letter-spacing: .1em; margin: 1.8rem 0 .6rem; border-bottom: 1px solid #f0f0f0; padding-bottom: .3rem; }
+  /* ── MAIN CONTENT ── */
+  .main-pad { padding: 1.8rem 3rem; }
 
-  .card { background: #fff; border: 1.5px solid #eee; border-radius: 16px; padding: 1.2rem 1.4rem; }
-  .card-title { font-size: 0.75rem; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: .07em; margin-bottom: .4rem; }
-  .card-name { font-size: 1.15rem; font-weight: 700; color: #111; margin-bottom: .3rem; }
-  .card-date { font-size: 0.8rem; color: #bbb; margin-bottom: .8rem; }
-  .card-stats { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .8rem; }
-  .stat-pill { background: #f5f5f5; border-radius: 20px; padding: 4px 12px; font-size: 0.82rem; color: #333; }
-  .ex-pill { background: #EEF2FF; color: #4F46E5; border-radius: 20px; padding: 3px 10px; font-size: 0.8rem; display: inline-block; margin: 2px; }
+  /* ── SECTION HEADER ── */
+  .sec {
+    font-size: .72rem; font-weight: 700; color: #94A3B8;
+    text-transform: uppercase; letter-spacing: .12em;
+    margin: 2rem 0 .8rem; display: flex; align-items: center; gap: .5rem;
+  }
+  .sec::after { content:''; flex:1; height:1px; background:#E2E8F0; }
 
-  .prod-table { width: 100%; border-collapse: collapse; margin-top: .4rem; }
-  .prod-table th { font-size: 0.72rem; color: #666; text-transform: uppercase; letter-spacing: .05em;
-                   border-bottom: 2px solid #e8e8e8; padding: 6px 10px; text-align: left; font-weight: 700; }
-  .prod-table td { font-size: 0.92rem; padding: 7px 10px; border-bottom: 1px solid #f0f0f0; color: #111; font-weight: 500; }
-  .prod-table td:nth-child(2) { color: #555; font-weight: 400; }
-  .prod-table td:nth-child(3) { color: #E05A2B; font-weight: 600; }
-  .prod-table tr:hover td { background: #f7f7f7; }
+  /* ── METRIC CARDS ── */
+  [data-testid="stMetricValue"] { font-size: 1.8rem !important; font-weight: 800; color: #0F172A; }
+  [data-testid="stMetricLabel"] { font-size: .7rem !important; color: #94A3B8 !important; text-transform: uppercase; letter-spacing: .08em; }
+  [data-testid="stMetricDelta"] { font-size: .78rem !important; }
+  [data-testid="stMetric"] {
+    background: #fff; border-radius: 16px;
+    padding: 1.1rem 1.3rem !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04);
+    border: 1px solid #F1F5F9;
+  }
+
+  /* ── WORKOUT CARDS ── */
+  .card {
+    background: #fff; border-radius: 18px; padding: 1.4rem 1.6rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 20px rgba(0,0,0,.05);
+    border: 1px solid #F1F5F9; height: 100%;
+  }
+  .card-title { font-size: .7rem; font-weight: 700; color: #94A3B8; text-transform: uppercase; letter-spacing: .1em; margin-bottom: .5rem; }
+  .card-name  { font-size: 1.2rem; font-weight: 800; color: #0F172A; margin-bottom: .2rem; line-height: 1.3; }
+  .card-date  { font-size: .78rem; color: #CBD5E1; margin-bottom: 1rem; }
+  .card-stats { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .6rem; }
+  .stat-pill  { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 20px; padding: 4px 12px; font-size: .8rem; color: #334155; font-weight: 500; }
+  .ex-pill    { background: #EEF2FF; color: #4F46E5; border-radius: 20px; padding: 3px 10px; font-size: .78rem; display: inline-block; margin: 2px; font-weight: 600; }
+
+  /* ── PRODUCT TABLE ── */
+  .prod-table { width: 100%; border-collapse: collapse; }
+  .prod-table th { font-size: .68rem; color: #94A3B8; text-transform: uppercase; letter-spacing: .06em;
+                   border-bottom: 2px solid #F1F5F9; padding: 6px 10px; text-align: left; font-weight: 700; }
+  .prod-table td { font-size: .9rem; padding: 7px 10px; border-bottom: 1px solid #F8FAFC; color: #1E293B; font-weight: 500; }
+  .prod-table td:nth-child(2) { color: #64748B; font-weight: 400; }
+  .prod-table td:nth-child(3) { color: #E05A2B; font-weight: 700; }
+  .prod-table tr:hover td { background: #F8FAFC; }
   .prod-table tr:last-child td { border-bottom: none; }
-  .prod-kcal { color: #E05A2B; font-size: 0.85rem; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -216,57 +264,75 @@ if not df_hevy.empty:
 #  LAYOUT
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Header
-c_img, c_name, c_date = st.columns([1, 4, 2])
-with c_img:
-    try:
-        st.image("zdj.jpg", width=160, output_format="JPEG")
-    except Exception:
-        pass
-with c_name:
-    st.markdown("<div style='padding-top:.3rem'><span style='font-size:2rem;font-weight:800'>Igor</span><br><span style='color:#aaa;font-size:.9rem'>Personal Health Dashboard</span></div>", unsafe_allow_html=True)
-with c_date:
-    st.markdown(
-        f"<div style='text-align:right;padding-top:.9rem;color:#aaa;font-size:.85rem;'>"
-        f"📅 {date.today().strftime('%A, %d %B %Y')}</div>",
-        unsafe_allow_html=True
-    )
-st.divider()
-
-
-# ── Waga + Sen ────────────────────────────────────────────────────────────────
-st.markdown('<div class="sec">📊 Sylwetka</div>', unsafe_allow_html=True)
-c1, c2, c3 = st.columns(3)
-
-c1.metric("⚖️ Waga", fmt(latest_weight, " kg", 1))
-c2.metric("📏 Wzrost", "181 cm")
-
 def sleep_label(s):
     if s is None: return None
-    q = "Świetny" if s >= 85 else "Dobry" if s >= 70 else "Średni" if s >= 50 else "Słaby"
+    q = "Świetny 🌟" if s >= 85 else "Dobry ✅" if s >= 70 else "Średni ⚠️" if s >= 50 else "Słaby ❌"
     return f"{int(s)}/100 · {q}"
 
-c3.metric("😴 Sen", fmt(sleep_h, " h", 1), delta=sleep_label(sleep_score), delta_color="off")
+# ── HERO ──────────────────────────────────────────────────────────────────────
+wt_str    = f"{latest_weight:.1f} kg" if latest_weight else "— kg"
+sleep_str = f"{sleep_h:.1f} h" if sleep_h else "—"
+sleep_q   = sleep_label(sleep_score) or ""
+bal_str   = (("+" if balance > 0 else "") + fmt(balance, " kcal", 0)) if balance is not None else "—"
+bal_lbl   = "Deficyt" if (balance or 0) > 0 else "Nadwyżka"
 
+try:
+    import base64
+    with open("zdj.jpg", "rb") as f:
+        img_b64 = base64.b64encode(f.read()).decode()
+    photo_html = f'<img class="hero-photo" src="data:image/jpeg;base64,{img_b64}"/>'
+except Exception:
+    photo_html = '<div class="hero-photo-placeholder">🏃</div>'
+
+st.markdown(f"""
+<div class="hero">
+  {photo_html}
+  <div style="flex:1">
+    <div class="hero-name">Igor Stokowski</div>
+    <div class="hero-sub">Personal Health Dashboard</div>
+    <div class="hero-date">📅 {date.today().strftime('%A, %d %B %Y')}</div>
+    <div class="hero-stats">
+      <div>
+        <div class="hero-stat-val">{wt_str}</div>
+        <div class="hero-stat-lbl">Waga · 181 cm</div>
+      </div>
+      <div style="width:1px;background:rgba(255,255,255,.1)"></div>
+      <div>
+        <div class="hero-stat-val">{sleep_str}</div>
+        <div class="hero-stat-lbl">Sen · {sleep_q}</div>
+      </div>
+      <div style="width:1px;background:rgba(255,255,255,.1)"></div>
+      <div>
+        <div class="hero-stat-val">{fmt(steps,'',0) if steps else '—'}</div>
+        <div class="hero-stat-lbl">Kroków wczoraj</div>
+      </div>
+      <div style="width:1px;background:rgba(255,255,255,.1)"></div>
+      <div>
+        <div class="hero-stat-val" style="color:{'#34D399' if (balance or 0)>0 else '#F87171'}">{bal_str}</div>
+        <div class="hero-stat-lbl">{bal_lbl} kalorii</div>
+      </div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── MAIN CONTENT wrapper ──────────────────────────────────────────────────────
+st.markdown('<div class="main-pad">', unsafe_allow_html=True)
 
 # ── Kalorie ───────────────────────────────────────────────────────────────────
-fit_date_label = datetime.strptime(fit_date_used, "%Y-%m-%d").strftime("%d.%m.%Y") if fit_date_used else "—"
+fit_date_label    = datetime.strptime(fit_date_used, "%Y-%m-%d").strftime("%d.%m.%Y") if fit_date_used else "—"
 garmin_date_label = (date.today()-timedelta(days=1)).strftime("%d.%m.%Y")
-st.markdown(
-    f'<div class="sec">🔥 Kalorie — Garmin: {garmin_date_label} · Fitatu: {fit_date_label}</div>',
-    unsafe_allow_html=True
-)
+st.markdown(f'<div class="sec">🔥 Kalorie — Garmin: {garmin_date_label} · Fitatu: {fit_date_label}</div>', unsafe_allow_html=True)
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("👟 Kroki",        fmt(steps, "", 0) if steps else "—")
-c2.metric("🔥 Spalone",      fmt(kcal_burned, " kcal", 0))
-c3.metric("🥗 Spożyte",      fmt(kcal_eaten,  " kcal", 0) if kcal_eaten else "—")
-
+c1.metric("🔥 Spalone",  fmt(kcal_burned, " kcal", 0))
+c2.metric("🥗 Spożyte",  fmt(kcal_eaten,  " kcal", 0) if kcal_eaten else "—")
 if balance is not None:
     lbl   = "📉 Deficyt" if balance > 0 else "📈 Nadwyżka"
     color = "normal"    if balance > 0 else "inverse"
-    c4.metric(lbl, fmt(abs(balance), " kcal", 0), delta_color=color)
+    c3.metric(lbl, fmt(abs(balance), " kcal", 0), delta_color=color)
 else:
-    c4.metric("⚡ Bilans", "—")
+    c3.metric("⚡ Bilans", "—")
+c4.metric("👟 Kroki", fmt(steps, "", 0) if steps else "—")
 
 
 # ── Makra ─────────────────────────────────────────────────────────────────────
@@ -702,6 +768,11 @@ if not df_prod.empty:
 else:
     st.markdown('<div style="color:#bbb;font-size:.9rem">Brak danych produktów</div>', unsafe_allow_html=True)
 
+st.markdown('</div>', unsafe_allow_html=True)
+
 # Footer
-st.divider()
-st.caption(f"🔄 Odświeża się co 5 min  ·  {datetime.now().strftime('%H:%M:%S')}  ·  Garmin · Fitatu · Hevy")
+st.markdown(f"""
+<div style="text-align:center;padding:1.5rem;font-size:.75rem;color:#94A3B8;border-top:1px solid #E2E8F0;margin-top:1rem">
+  🔄 Odświeża się co 5 min &nbsp;·&nbsp; {datetime.now().strftime('%H:%M')} &nbsp;·&nbsp; Garmin · Fitatu · Hevy
+</div>
+""", unsafe_allow_html=True)
