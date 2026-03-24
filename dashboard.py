@@ -332,8 +332,9 @@ st.markdown('<div class="main-pad">', unsafe_allow_html=True)
 
 # ── Kalorie ───────────────────────────────────────────────────────────────────
 fit_date_label    = datetime.strptime(fit_date_used, "%Y-%m-%d").strftime("%d.%m.%Y") if fit_date_used else "—"
-garmin_date_label = datetime.strptime(active_row.get("Data","") if active_row is not None else yday, "%Y-%m-%d").strftime("%d.%m.%Y") if active_row is not None else "—"
-garmin_lbl        = "dziś" if (active_row is not None and active_row.get("Data","")[:10] == today) else "wczoraj"
+_active_date      = pd.Timestamp(active_row["Data"]).strftime("%Y-%m-%d") if active_row is not None else yday
+garmin_date_label = datetime.strptime(_active_date, "%Y-%m-%d").strftime("%d.%m.%Y")
+garmin_lbl        = "dziś" if _active_date == today else "wczoraj"
 fitatu_lbl        = "dziś" if fit_date_used == today else "wczoraj"
 st.markdown(f'<div class="sec">🔥 Kalorie — Garmin: {garmin_date_label} ({garmin_lbl}) · Fitatu: {fit_date_label} ({fitatu_lbl})</div>', unsafe_allow_html=True)
 c1, c2, c3, c4 = st.columns(4)
