@@ -25,8 +25,7 @@ jobs:
 
       - name: Przywróć sesję Garmin
         run: |
-          mkdir -p SESJA_GARTH
-          echo "${{ secrets.GARTH_SESSION }}" | base64 -d > SESJA_GARTH/oauth2_token.json
+          echo "${{ secrets.GARTH_SESSION }}" | base64 -d | tar -xz
 
       - name: Utwórz .env
         run: |
