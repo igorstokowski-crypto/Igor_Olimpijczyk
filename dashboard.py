@@ -301,16 +301,6 @@ st.markdown(f"""
         <div class="hero-stat-val">{sleep_str}</div>
         <div class="hero-stat-lbl">Sen · {sleep_q}</div>
       </div>
-      <div style="width:1px;background:rgba(255,255,255,.1)"></div>
-      <div>
-        <div class="hero-stat-val">{fmt(steps,'',0) if steps else '—'}</div>
-        <div class="hero-stat-lbl">Kroków wczoraj</div>
-      </div>
-      <div style="width:1px;background:rgba(255,255,255,.1)"></div>
-      <div>
-        <div class="hero-stat-val" style="color:{'#34D399' if (balance or 0)>0 else '#F87171'}">{bal_str}</div>
-        <div class="hero-stat-lbl">{bal_lbl} kalorii</div>
-      </div>
     </div>
   </div>
 </div>
