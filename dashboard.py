@@ -93,12 +93,13 @@ yday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
 # ── Load ───────────────────────────────────────────────────────────────────────
 with st.spinner(""):
-    df_dz   = sheet("Dziennik")
-    df_akt  = sheet("Aktywności")
-    df_hevy = sheet("Hevy")
-    df_fit  = sheet("Fitatu")
-    df_prod = sheet("FitatuProdukty")
-    df_gen  = sheet("General")
+    df_dz    = sheet("Dziennik")
+    df_akt   = sheet("Aktywności")
+    df_hevy  = sheet("Hevy")
+    df_fit   = sheet("Fitatu")
+    df_prod  = sheet("FitatuProdukty")
+    df_gen   = sheet("General")
+    df_trasy = sheet("Trasy")
 
 
 # ── Dziennik ───────────────────────────────────────────────────────────────────
@@ -443,6 +444,19 @@ with c_kardio:
         def row_section(label, html):
             return f'<div style="margin:.5rem 0 .2rem;font-size:.7rem;color:#aaa;text-transform:uppercase;letter-spacing:.06em">{label}</div><div class="card-stats">{html}</div>' if html.strip() else ""
 
+        # Szukaj trasy GPS
+        gps_points = None
+        act_id_str = str(last_cardio.get("ID", ""))
+        if act_id_str and not df_trasy.empty and "Aktywnosc_ID" in df_trasy.columns:
+            match = df_trasy[df_trasy["Aktywnosc_ID"] == act_id_str]
+            if not match.empty:
+                raw = match.iloc[-1].get("Punkty_JSON", "")
+                if raw:
+                    try:
+                        gps_points = json.loads(raw)
+                    except Exception:
+                        gps_points = None
+
         st.markdown(f"""
         <div class="card">
           <div class="card-title">🏃 Ostatni trening kardio</div>
@@ -456,6 +470,39 @@ with c_kardio:
           {row_section("Efekty treningowe", eff_pills)}
         </div>
         """, unsafe_allow_html=True)
+
+        # Mapa trasy
+        if gps_points and len(gps_points) >= 2:
+            lats = [p[0] for p in gps_points]
+            lons = [p[1] for p in gps_points]
+            clat = sum(lats) / len(lats)
+            clon = sum(lons) / len(lons)
+            fig_map = go.Figure()
+            fig_map.add_trace(go.Scattermapbox(
+                lat=lats, lon=lons, mode="lines",
+                line=dict(width=3, color="#4F46E5"),
+                name="Trasa", hoverinfo="skip",
+            ))
+            fig_map.add_trace(go.Scattermapbox(
+                lat=[lats[0]], lon=[lons[0]], mode="markers",
+                marker=dict(size=14, color="#10B981"),
+                name="Start",
+            ))
+            fig_map.add_trace(go.Scattermapbox(
+                lat=[lats[-1]], lon=[lons[-1]], mode="markers",
+                marker=dict(size=14, color="#EF4444"),
+                name="Meta",
+            ))
+            fig_map.update_layout(
+                mapbox_style="open-street-map",
+                mapbox=dict(center=dict(lat=clat, lon=clon), zoom=13),
+                margin=dict(l=0, r=0, t=0, b=0),
+                height=380,
+                legend=dict(orientation="h", y=1.02, x=0),
+            )
+            st.plotly_chart(fig_map, use_container_width=True)
+        elif gps_points is None and act_id_str:
+            st.caption("🏟️ Brak trasy GPS — bieżnia lub indoor")
     else:
         st.markdown('<div class="card"><div class="card-title">🏃 Ostatni trening kardio</div><div style="color:#bbb;margin-top:.5rem">Brak danych</div></div>', unsafe_allow_html=True)
 

@@ -98,6 +98,10 @@ OKRAZENIA_COLS = [
 ]
 FITATU_COLS         = ["Data", "Kcal", "Bialko_g", "Tluszcze_g", "Wegle_g"]
 FITATU_PROD_COLS    = ["Data", "Produkt", "Gramy", "Kcal"]
+TRASY_COLS          = ["Aktywnosc_ID", "Typ", "Punkty_JSON"]
+
+# Typy aktywności bez GPS (bieżnia, indoor)
+INDOOR_TYPES = {"treadmill_running", "indoor_cycling", "virtual_ride", "indoor_rowing", "strength_training"}
 HEVY_COLS           = [
     "ID_treningu", "Data_start", "Data_koniec", "Czas_trwania",
     "Trening", "Opis_treningu",
@@ -107,6 +111,27 @@ HEVY_COLS           = [
 ]
 
 # ── HELPERS ───────────────────────────────────────────
+def fetch_gps_track(garmin, activity_id: int, activity_type: str, max_points: int = 300) -> str:
+    """Pobierz trasę GPS aktywności. Zwraca JSON string lub '' gdy brak GPS."""
+    if activity_type in INDOOR_TYPES:
+        return ""
+    try:
+        details = garmin.get_activity_details(int(activity_id), maxpoly=max_points)
+        geo = (details or {}).get("geoPolylineDTO") or {}
+        pts = geo.get("polyline") or []
+        if not pts:
+            return ""
+        step = max(1, len(pts) // max_points)
+        track = [
+            [round(p["lat"], 6), round(p["lon"], 6)]
+            for p in pts[::step]
+            if "lat" in p and "lon" in p
+        ]
+        return json.dumps(track) if track else ""
+    except Exception as e:
+        print(f"    ⚠️ GPS fetch {activity_id}: {e}")
+        return ""
+
 def secs_to_str(s) -> str:
     s = int(s or 0)
     h, r = divmod(s, 3600)
@@ -690,6 +715,7 @@ def main():
         "Fitatu":         FITATU_COLS,
         "FitatuProdukty": FITATU_PROD_COLS,
         "Hevy":           HEVY_COLS,
+        "Trasy":          TRASY_COLS,
     })
 
     existing_hevy = get_existing_keys(sheets, "Hevy")
@@ -703,6 +729,8 @@ def main():
             return True
         return date_str not in existing_keys
 
+    existing_trasy = get_existing_keys(sheets, "Trasy")
+
     new = {
         "Dziennik":       [],
         "Aktywności":     [],
@@ -710,6 +738,7 @@ def main():
         "Fitatu":         [],
         "FitatuProdukty": [],
         "Hevy":           [],
+        "Trasy":          [],
     }
 
     # ── GARMIN ────────────────────────────────────────
@@ -745,6 +774,19 @@ def main():
             act_row, laps = fetch_garmin_activity(garmin, act)
             new["Aktywności"].append(act_row)
             new["Okrążenia"].extend(laps)
+            # GPS trasa — tylko jeśli jeszcze nie mamy
+            act_id_str = str(act["activityId"])
+            if act_id_str not in existing_trasy:
+                gps_json = fetch_gps_track(garmin, act["activityId"], act_row.get("Typ", ""))
+                if gps_json:
+                    new["Trasy"].append({
+                        "Aktywnosc_ID": act_id_str,
+                        "Typ":          act_row.get("Typ", ""),
+                        "Punkty_JSON":  gps_json,
+                    })
+                    print(f"    🗺️  GPS: {len(json.loads(gps_json))} punktów")
+                else:
+                    print(f"    🏟️  Brak GPS (indoor/bieżnia)")
             lap_info = f"  {len(laps)} okr." if laps else ""
             print(f"  {act_row['Data']}  [{act_row['Typ']}]  "
                   f"{act_row['Dystans_km']} km{lap_info}")
@@ -790,6 +832,7 @@ def main():
     upsert_to_sheet(sheets, "Fitatu",         FITATU_COLS,      new["Fitatu"])
     upsert_multirow(sheets, "FitatuProdukty", FITATU_PROD_COLS, new["FitatuProdukty"], "Data")
     append_to_sheet(sheets, "Hevy",           HEVY_COLS,        new["Hevy"])
+    append_to_sheet(sheets, "Trasy",          TRASY_COLS,       new["Trasy"])
 
     # ── EKSPORT LOKALNY ───────────────────────────────
     print("\n─── EKSPORT LOKALNY ──────────────────────────────")
