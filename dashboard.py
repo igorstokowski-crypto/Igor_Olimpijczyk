@@ -14,8 +14,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID", "")
-CREDS_FILE     = os.getenv("GOOGLE_CREDENTIALS", "credentials.json")
+try:
+    SPREADSHEET_ID = st.secrets.get("SPREADSHEET_ID", os.getenv("SPREADSHEET_ID", ""))
+except Exception:
+    SPREADSHEET_ID = os.getenv("SPREADSHEET_ID", "")
+CREDS_FILE = os.getenv("GOOGLE_CREDENTIALS", "credentials.json")
 SCOPES         = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
 st.set_page_config(page_title="Igor · Dashboard", page_icon="🏃", layout="wide")
