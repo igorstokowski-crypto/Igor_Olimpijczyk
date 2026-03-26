@@ -9,6 +9,9 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      secrets: write
 
     steps:
       - name: Checkout
@@ -50,8 +53,13 @@ jobs:
 
       - name: Zaktualizuj sesję Garmin (jeśli odświeżona)
         if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -f "SESJA_GARTH/oauth2_token.json" ]; then
-            NEW_SESSION=$(base64 -w 0 SESJA_GARTH/oauth2_token.json)
-            echo "Sesja Garmin OK ($(wc -c < SESJA_GARTH/oauth2_token.json) bajtów)"
+          if [ -d "SESJA_GARTH" ] && [ "$(ls -A SESJA_GARTH 2>/dev/null)" ]; then
+            NEW_SESSION=$(tar -czf - SESJA_GARTH/ | base64 -w 0)
+            gh secret set GARTH_SESSION --body "$NEW_SESSION" --repo "${{ github.repository }}"
+            echo "✅ Sesja Garmin zaktualizowana w GitHub Secrets"
+          else
+            echo "⚠️ Brak plików w SESJA_GARTH — sesja nie zaktualizowana"
           fi
