@@ -1147,16 +1147,26 @@ def main():
 
     today     = datetime.date.today().isoformat()
     yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
-    # W CI odświeżaj zawsze ostatnie 7 dni (na wypadek pustych wierszy z braku synca)
-    # Lokalnie: tylko dziś i wczoraj + brakujące
-    refresh_cutoff = (
-        (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
-        if in_ci else yesterday
-    )
+
+    # Pobierz które istniejące wiersze mają puste Kroki (kolumna B)
+    dz_has_steps = {}  # {date_str: bool}
+    try:
+        res = sheets.values().get(
+            spreadsheetId=SPREADSHEET_ID, range="'Dziennik'!A2:B"
+        ).execute()
+        for r in (res.get("values") or []):
+            date_val  = r[0] if len(r) > 0 else ""
+            kroki_val = r[1] if len(r) > 1 else ""
+            dz_has_steps[date_val] = bool(kroki_val and kroki_val not in ("", "0"))
+    except Exception:
+        pass
+
     def should_refresh(date_str: str, existing_keys: dict) -> bool:
-        if date_str >= refresh_cutoff:
+        if date_str >= yesterday:          # dziś i wczoraj — zawsze
             return True
-        return date_str not in existing_keys
+        if date_str not in existing_keys:  # brakujący wiersz
+            return True
+        return not dz_has_steps.get(date_str, True)  # pusty wiersz (brak kroków)
 
     existing_trasy = get_existing_keys(sheets, "Trasy")
 
