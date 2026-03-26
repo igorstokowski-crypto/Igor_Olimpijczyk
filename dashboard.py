@@ -387,6 +387,13 @@ st.markdown(f"""
 #  WSPÓLNE DANE DLA WYKRESÓW (przygotowane raz, używane w kilku zakładkach)
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ── DEBUG ─────────────────────────────────────────────────────────────────────
+st.info(
+    f"🔍 DEBUG | today={today} | Dziennik={len(df_dz)} wierszy | "
+    f"ostatnia data={df_dz['Data'].iloc[-1] if not df_dz.empty and 'Data' in df_dz.columns else 'BRAK'} | "
+    f"SPREADSHEET_ID={'OK (' + SPREADSHEET_ID[:6] + '...)' if SPREADSHEET_ID else 'PUSTY!'}"
+)
+
 CHART_H = 300
 
 def sparkline_layout(fig, title=""):
