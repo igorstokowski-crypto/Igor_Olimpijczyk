@@ -186,30 +186,31 @@ if not df_fit.empty:
 fitatu_has_today = (not df_fit2.empty and
                     not df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == today].empty)
 
-# Wybierz wspólną datę
-if garmin_has_today and fitatu_has_today:
-    shared_date = today
-    active_row  = row_td
+# Garmin — zawsze dziś jeśli jest, wpp wczoraj
+if garmin_has_today:
+    active_row   = row_td
     active_label = "dziś"
 elif row_yd is not None:
-    shared_date  = yday
     active_row   = row_yd
     active_label = "wczoraj"
 else:
-    shared_date  = today
-    active_row   = row_td
+    active_row   = None
     active_label = "—"
 
-# Fitatu dla wspólnej daty
+garmin_date = today if garmin_has_today else yday
+
+# Fitatu — najnowszy dostępny dzień (niezależnie od Garmin)
 if not df_fit2.empty:
     col_kcal_f = df_fit2.columns[1] if len(df_fit2.columns) > 1 else None
-    r = df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == shared_date]
+    r = df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == today]
     if r.empty:
-        r = df_fit2.iloc[[-1]]   # absolutny fallback — ostatni dostępny
+        r = df_fit2.iloc[[-1]]   # ostatni dostępny
     fit_row       = r.iloc[-1]
     fit_date_used = fit_row["_dt"].strftime("%Y-%m-%d")
     if col_kcal_f:
         kcal_eaten = n(fit_row[col_kcal_f])
+
+shared_date = garmin_date
 
 # weight — z arkusza General, komórka E2 (Current Weight)
 latest_weight = None
@@ -235,7 +236,7 @@ if not df_prod.empty:
 
 # Balance — tylko gdy oba z tej samej daty
 balance = None
-if kcal_burned and kcal_eaten:
+if kcal_burned and kcal_eaten and fit_date_used == garmin_date:
     balance = int(kcal_burned - kcal_eaten)
 
 # Last cardio
