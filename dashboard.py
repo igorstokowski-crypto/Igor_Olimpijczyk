@@ -171,7 +171,7 @@ if not df_dz.empty and "Data" in df_dz.columns:
 # 2. Jeśli jedno źródło nie ma dziś danych → użyj wczoraj dla obu
 # 3. Fallback: wczoraj Garmin + ostatni dostępny Fitatu (jeśli brak wczoraj)
 
-garmin_has_today = (row_td is not None and (n(row_td.get("Kroki", 0)) or 0) > 0)
+garmin_has_today = (row_td is not None)
 
 # Przygotuj Fitatu lookup
 fit_row, kcal_eaten, fit_date_used = None, None, yday
