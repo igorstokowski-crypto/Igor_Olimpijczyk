@@ -153,13 +153,6 @@ with st.spinner(""):
     df_gen   = sheet("General")
     df_trasy = sheet("Trasy")
 
-# ── DEBUG tymczasowy ───────────────────────────────────────────────────────────
-with st.expander("🔍 DEBUG (usuń po naprawie)"):
-    st.write(f"**SPREADSHEET_ID:** `{SPREADSHEET_ID[:8]}...`" if SPREADSHEET_ID else "**SPREADSHEET_ID: PUSTY!**")
-    st.write(f"**today:** `{today}` | **yday:** `{yday}`")
-    st.write(f"**Dziennik wiersze:** {len(df_dz)} | **ostatnia data:** {df_dz['Data'].iloc[-1] if not df_dz.empty and 'Data' in df_dz.columns else 'BRAK'}")
-    st.write(f"**Fitatu wiersze:** {len(df_fit)} | **ostatnia data:** {df_fit.iloc[-1, 0] if not df_fit.empty else 'BRAK'}")
-    st.write(f"**Dziennik daty (ostatnie 3):** {df_dz['Data'].tail(3).tolist() if not df_dz.empty and 'Data' in df_dz.columns else []}")
 
 
 # ── Dziennik ───────────────────────────────────────────────────────────────────
@@ -386,13 +379,6 @@ st.markdown(f"""
 # ══════════════════════════════════════════════════════════════════════════════
 #  WSPÓLNE DANE DLA WYKRESÓW (przygotowane raz, używane w kilku zakładkach)
 # ══════════════════════════════════════════════════════════════════════════════
-
-# ── DEBUG ─────────────────────────────────────────────────────────────────────
-st.info(
-    f"🔍 DEBUG | today={today} | Dziennik={len(df_dz)} wierszy | "
-    f"ostatnia data={df_dz['Data'].iloc[-1] if not df_dz.empty and 'Data' in df_dz.columns else 'BRAK'} | "
-    f"SPREADSHEET_ID={'OK (' + SPREADSHEET_ID[:6] + '...)' if SPREADSHEET_ID else 'PUSTY!'}"
-)
 
 CHART_H = 300
 
