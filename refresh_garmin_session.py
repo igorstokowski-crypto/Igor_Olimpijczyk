@@ -16,12 +16,26 @@ SESSION_DIR = Path("SESJA_GARTH")
 SESSION_DIR.mkdir(exist_ok=True)
 garth.home = str(SESSION_DIR)
 
+import time
+
 print("⏳ Loguję się do Garmin Connect...")
 print("   (może pojawić się prośba o kod MFA — wpisz go i zatwierdź Enterem)\n")
 
-garth.login(GARMIN_EMAIL, GARMIN_PASSWORD)
-garth.save(str(SESSION_DIR))
-print("✅ Zalogowano! Sesja zapisana.\n")
+delays = [0, 60, 120, 300]
+for attempt, delay in enumerate(delays, 1):
+    if delay:
+        print(f"  ⏳ Rate limit — czekam {delay}s przed próbą {attempt}/{len(delays)}...")
+        time.sleep(delay)
+    try:
+        garth.login(GARMIN_EMAIL, GARMIN_PASSWORD)
+        garth.save(str(SESSION_DIR))
+        print("✅ Zalogowano! Sesja zapisana.\n")
+        break
+    except Exception as e:
+        if "429" in str(e) and attempt < len(delays):
+            print(f"  ⚠️  429 Too Many Requests")
+            continue
+        raise
 
 # Generuj wartość secretu
 buf = io.BytesIO()
