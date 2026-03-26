@@ -9,10 +9,6 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
-      secrets: write
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,7 +50,7 @@ jobs:
       - name: Zaktualizuj sesję Garmin (jeśli odświeżona)
         if: always()
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           if [ -d "SESJA_GARTH" ] && [ "$(ls -A SESJA_GARTH 2>/dev/null)" ]; then
             NEW_SESSION=$(tar -czf - SESJA_GARTH/ | base64 -w 0)
