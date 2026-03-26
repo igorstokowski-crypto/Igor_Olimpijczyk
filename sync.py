@@ -1147,9 +1147,14 @@ def main():
 
     today     = datetime.date.today().isoformat()
     yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
-    # Zawsze odświeżaj dziś i wczoraj; starsze dni — tylko jeśli brak
+    # W CI odświeżaj zawsze ostatnie 7 dni (na wypadek pustych wierszy z braku synca)
+    # Lokalnie: tylko dziś i wczoraj + brakujące
+    refresh_cutoff = (
+        (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+        if in_ci else yesterday
+    )
     def should_refresh(date_str: str, existing_keys: dict) -> bool:
-        if date_str >= yesterday:   # dziś lub wczoraj — zawsze update
+        if date_str >= refresh_cutoff:
             return True
         return date_str not in existing_keys
 
