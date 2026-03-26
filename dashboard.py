@@ -162,68 +162,75 @@ if not df_dz.empty and "Data" in df_dz.columns:
     row_td = dz[m_td].iloc[-1] if m_td.any() else None
     row_yd = dz[m_yd].iloc[-1] if m_yd.any() else None
 
-# Dziś jako priorytet, wczoraj jako fallback
-def pick(col, today_row, yday_row):
-    v = n(today_row.get(col)) if today_row is not None else None
-    if v is None or v == 0.0:
-        v = n(yday_row.get(col)) if yday_row is not None else None
-    return v
+# ── Ustal wspólną datę dla Garmin + Fitatu ─────────────────────────────────────
+# Zasada: obie wartości (spalone i spożyte) MUSZĄ być z tego samego dnia.
+# 1. Jeśli dziś ma i Garmin (kroki>0) i Fitatu → użyj dziś
+# 2. Jeśli jedno źródło nie ma dziś danych → użyj wczoraj dla obu
+# 3. Fallback: wczoraj Garmin + ostatni dostępny Fitatu (jeśli brak wczoraj)
 
-def pick_row():
-    """Zwraca (row, label) — dziś jeśli ma dane, inaczej wczoraj"""
-    if row_td is not None and n(row_td.get("Kroki", 0) or 0):
-        return row_td, "dziś"
-    if row_yd is not None:
-        return row_yd, "wczoraj"
-    return None, "—"
+garmin_has_today = (row_td is not None and (n(row_td.get("Kroki", 0)) or 0) > 0)
 
-active_row, active_label = pick_row()
+# Przygotuj Fitatu lookup
+fit_row, kcal_eaten, fit_date_used = None, None, yday
+df_fit2 = pd.DataFrame()
+if not df_fit.empty:
+    df_fit2 = df_fit.copy()
+    col_date_f = df_fit2.columns[0]
+    col_kcal_f = df_fit2.columns[1] if len(df_fit2.columns) > 1 else None
+    df_fit2["_dt"] = pd.to_datetime(df_fit2[col_date_f].astype(str).str.strip().str[:10], errors="coerce")
+    df_fit2 = df_fit2.dropna(subset=["_dt"]).sort_values("_dt")
+
+fitatu_has_today = (not df_fit2.empty and
+                    not df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == today].empty)
+
+# Wybierz wspólną datę
+if garmin_has_today and fitatu_has_today:
+    shared_date = today
+    active_row  = row_td
+    active_label = "dziś"
+elif row_yd is not None:
+    shared_date  = yday
+    active_row   = row_yd
+    active_label = "wczoraj"
+else:
+    shared_date  = today
+    active_row   = row_td
+    active_label = "—"
+
+# Fitatu dla wspólnej daty
+if not df_fit2.empty:
+    col_kcal_f = df_fit2.columns[1] if len(df_fit2.columns) > 1 else None
+    r = df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == shared_date]
+    if r.empty:
+        r = df_fit2.iloc[[-1]]   # absolutny fallback — ostatni dostępny
+    fit_row       = r.iloc[-1]
+    fit_date_used = fit_row["_dt"].strftime("%Y-%m-%d")
+    if col_kcal_f:
+        kcal_eaten = n(fit_row[col_kcal_f])
 
 # weight — z arkusza General, komórka E2 (Current Weight)
-# używamy df_gen już załadowanego, col E = indeks 4, row 2 = iloc[0]
 latest_weight = None
 try:
     if not df_gen.empty and len(df_gen.columns) >= 5:
-        raw_w = df_gen.iloc[0, 4]
-        latest_weight = n(raw_w)
+        latest_weight = n(df_gen.iloc[0, 4])
 except Exception:
     pass
 
-# Sen z dziś (Garmin zapisuje sen nocy pod datą przebudzenia = dziś rano)
-# Kroki/kalorie z dziś jeśli są, inaczej wczoraj
-sleep_h     = n(row_td.get("Sen_h"))     if row_td is not None else n(row_yd.get("Sen_h")     if row_yd is not None else None)
-sleep_score = n(row_td.get("Jakos_snu")) if row_td is not None else n(row_yd.get("Jakos_snu") if row_yd is not None else None)
-steps       = n(active_row.get("Kroki"))              if active_row is not None else None
-kcal_burned = n(active_row.get("Kalorie_calkowite"))  if active_row is not None else None
-dist_day    = n(active_row.get("Dystans_dzienny_km")) if active_row is not None else None
+# Sen zawsze z dziś (Garmin zapisuje sen nocy pod datą przebudzenia)
+sleep_h     = n(row_td.get("Sen_h"))     if row_td is not None else (n(row_yd.get("Sen_h"))     if row_yd is not None else None)
+sleep_score = n(row_td.get("Jakos_snu")) if row_td is not None else (n(row_yd.get("Jakos_snu")) if row_yd is not None else None)
 
-# Fitatu — A=Data, B=Kcal — priorytet: dziś → wczoraj → ostatni dostępny
-fit_row, kcal_eaten, fit_date_used = None, None, today
+steps       = n(active_row.get("Kroki"))             if active_row is not None else None
+kcal_burned = n(active_row.get("Kalorie_calkowite")) if active_row is not None else None
+dist_day    = n(active_row.get("Dystans_dzienny_km"))if active_row is not None else None
 
-if not df_fit.empty:
-    df_fit2 = df_fit.copy()
-    col_date = df_fit2.columns[0]
-    col_kcal = df_fit2.columns[1] if len(df_fit2.columns) > 1 else None
-    df_fit2["_dt"] = pd.to_datetime(df_fit2[col_date].astype(str).str.strip().str[:10], errors="coerce")
-    df_fit2 = df_fit2.dropna(subset=["_dt"]).sort_values("_dt")
-    if not df_fit2.empty:
-        r = df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == today]   # dziś
-        if r.empty:
-            r = df_fit2[df_fit2["_dt"].dt.strftime("%Y-%m-%d") == yday]  # wczoraj
-        if r.empty:
-            r = df_fit2.iloc[[-1]]                                        # ostatni dostępny
-        fit_row       = r.iloc[-1]
-        fit_date_used = fit_row["_dt"].strftime("%Y-%m-%d")
-        if col_kcal:
-            kcal_eaten = n(fit_row[col_kcal])
-
-# Products — A=Data, B=Produkt, reszta kolumn opcjonalnie
+# Products — z tej samej daty co Fitatu
 prods = pd.DataFrame()
 if not df_prod.empty:
-    col_pd = df_prod.columns[0]   # A — data
+    col_pd = df_prod.columns[0]
     prods = df_prod[df_prod[col_pd].astype(str).str.strip().str[:10] == fit_date_used].copy()
 
-# Balance
+# Balance — tylko gdy oba z tej samej daty
 balance = None
 if kcal_burned and kcal_eaten:
     balance = int(kcal_burned - kcal_eaten)
@@ -491,13 +498,11 @@ with tab_dzis:
     cm6.metric("🔥 Kardio łącznie",  f"{month_kardio}×")
 
     # ── Kalorie & Kroki ────────────────────────────────────────────────────────
-    fit_date_label    = datetime.strptime(fit_date_used, "%Y-%m-%d").strftime("%d.%m.%Y") if fit_date_used else "—"
-    _active_date      = pd.Timestamp(active_row["Data"]).strftime("%Y-%m-%d") if active_row is not None else yday
-    garmin_date_label = datetime.strptime(_active_date, "%Y-%m-%d").strftime("%d.%m.%Y")
-    garmin_lbl        = "dziś" if _active_date == today else "wczoraj"
-    fitatu_lbl        = "dziś" if fit_date_used == today else "wczoraj"
+    shared_date_label = datetime.strptime(shared_date, "%Y-%m-%d").strftime("%d.%m.%Y")
+    shared_lbl        = "dziś" if shared_date == today else "wczoraj"
+    fitatu_lbl        = shared_lbl  # zawsze ta sama data co Garmin
 
-    st.markdown(f'<div class="sec">🔥 Kalorie — Garmin: {garmin_date_label} ({garmin_lbl}) · Fitatu: {fit_date_label} ({fitatu_lbl})</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sec">🔥 Kalorie — {shared_date_label} ({shared_lbl})</div>', unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("🔥 Spalone",  fmt(kcal_burned, " kcal", 0))
     c2.metric("🥗 Spożyte",  fmt(kcal_eaten,  " kcal", 0) if kcal_eaten else "—")
