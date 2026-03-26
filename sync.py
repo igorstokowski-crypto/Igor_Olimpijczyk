@@ -1195,6 +1195,10 @@ def main():
             continue
         weight_for_day = current_weight if date_str == today else None
         row = fetch_garmin_daily(garmin, date_str, weight_for_day)
+        has_data = bool(row.get("Kroki") or row.get("Kalorie_calkowite") or row.get("Sen_h"))
+        if not has_data and date_str in existing_dz:
+            print(f"  {date_str}  ⚠️ brak danych z Garmin — pomijam (nie nadpisuję istniejących)")
+            continue
         new["Dziennik"].append(row)
         print(f"  {date_str}  {row.get('Kroki', 0):>6} kroków  "
               f"sen: {row.get('Sen_h', 0)}h  "
