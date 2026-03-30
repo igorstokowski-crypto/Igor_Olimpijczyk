@@ -673,7 +673,7 @@ with tab_dzis:
                 fig_map.add_trace(go.Scattermapbox(lat=[lats[-1]], lon=[lons[-1]], mode="markers", marker=dict(size=14, color="#EF4444"), name="Meta"))
                 fig_map.update_layout(mapbox_style="open-street-map", mapbox=dict(center=dict(lat=clat, lon=clon), zoom=13),
                                       margin=dict(l=0,r=0,t=0,b=0), height=380, legend=dict(orientation="h", y=1.02, x=0))
-                st.plotly_chart(fig_map, use_container_width=True)
+                st.plotly_chart(fig_map, width="stretch")
             elif gps_points is None and act_id_str:
                 st.caption("🏟️ Brak trasy GPS — bieżnia lub indoor")
         else:
@@ -702,7 +702,7 @@ with tab_hist:
             fig.add_hline(y=target, line_dash="dot", line_color="#aaa",
                           annotation_text="10 000 cel", annotation_position="top right")
             sparkline_layout(fig, "👟 Historia kroków")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     # 2. Bilans kalorii
     if not hist_bal.empty:
@@ -715,7 +715,7 @@ with tab_hist:
             fig2.add_hline(y=0, line_color="#888", line_width=1)
             sparkline_layout(fig2, "📊 Bilans kalorii (🟢 deficyt / 🔴 nadwyżka)")
             fig2.update_layout(showlegend=False)
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width="stretch")
 
     # 3. Sen + HR w dwóch kolumnach
     ch1, ch2 = st.columns(2)
@@ -731,7 +731,7 @@ with tab_hist:
                                 annotation_text="7h cel", annotation_position="top right")
                 sparkline_layout(fig_s, "😴 Historia snu (h)")
                 fig_s.update_layout(showlegend=False)
-                st.plotly_chart(fig_s, use_container_width=True)
+                st.plotly_chart(fig_s, width="stretch")
     with ch2:
         if not hist_dz.empty and "HR_spoczynkowe" in hist_dz.columns:
             df_hr = hist_dz[hist_dz["Data"] >= cutoff][["Data","HR_spoczynkowe"]].dropna()
@@ -743,7 +743,7 @@ with tab_hist:
                     hovertemplate="%{x|%d.%m}: <b>%{y:.0f} bpm</b><extra>HR spocz.</extra>"))
                 sparkline_layout(fig_hr, "❤️ HR spoczynkowe (bpm)")
                 fig_hr.update_layout(showlegend=False)
-                st.plotly_chart(fig_hr, use_container_width=True)
+                st.plotly_chart(fig_hr, width="stretch")
 
     # 4. Historia makro
     if not hist_fit.empty and "Bialko_g" in hist_fit.columns:
@@ -765,7 +765,7 @@ with tab_hist:
                     line=dict(color="#10B981"), fillcolor="rgba(16,185,129,.25)",
                     hovertemplate="%{x|%d.%m}: <b>%{y:.0f} g</b><extra>Węgle</extra>"))
             sparkline_layout(fig, "🥗 Makro dzienne (g)")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     # 5. Historia produktów
     st.markdown('<div class="sec">🛒 Co jadłem — historia</div>', unsafe_allow_html=True)
@@ -1014,7 +1014,7 @@ with tab_miesiace:
                         hovertemplate="%{x}: <b>%{y:,.0f}</b> kroków<extra></extra>"))
                     sparkline_layout(fig_km, "👟 Kroki per miesiąc")
                     fig_km.update_layout(showlegend=False)
-                    st.plotly_chart(fig_km, use_container_width=True)
+                    st.plotly_chart(fig_km, width="stretch")
         with ch_b:
             if "Km łącznie" in df_months.columns:
                 df_plot2 = df_months[df_months["Km łącznie"] > 0].tail(12)
@@ -1025,7 +1025,7 @@ with tab_miesiace:
                         hovertemplate="%{x}: <b>%{y:.1f} km</b><extra></extra>"))
                     sparkline_layout(fig_km2, "🏃 Km biegania per miesiąc")
                     fig_km2.update_layout(showlegend=False)
-                    st.plotly_chart(fig_km2, use_container_width=True)
+                    st.plotly_chart(fig_km2, width="stretch")
 
         ch_c, ch_d = st.columns(2)
         with ch_c:
@@ -1039,7 +1039,7 @@ with tab_miesiace:
                         name=col, marker_color=colors_act.get(col, "#888")))
                 fig_act.update_layout(barmode="group")
                 sparkline_layout(fig_act, "🏋️ Treningi per miesiąc")
-                st.plotly_chart(fig_act, use_container_width=True)
+                st.plotly_chart(fig_act, width="stretch")
         with ch_d:
             if "Sen śr (h)" in df_months.columns:
                 df_plot4 = df_months[df_months["Sen śr (h)"] > 0].tail(12)
@@ -1053,7 +1053,7 @@ with tab_miesiace:
                                      annotation_text="7h", annotation_position="top right")
                     sparkline_layout(fig_sen, "😴 Średni sen per miesiąc (h)")
                     fig_sen.update_layout(showlegend=False)
-                    st.plotly_chart(fig_sen, use_container_width=True)
+                    st.plotly_chart(fig_sen, width="stretch")
 
         # Tabela miesięcy
         st.markdown('<div class="sec">📋 Tabela miesięcy</div>', unsafe_allow_html=True)
@@ -1063,7 +1063,7 @@ with tab_miesiace:
         df_show = df_months[display_cols].iloc[::-1].reset_index(drop=True).copy()
         # Konwertuj wszystko na str — najsafe dla PyArrow (brak OverflowError z dużych int)
         df_show = df_show.astype(str).replace("nan", "—").replace("<NA>", "—").replace("None", "—")
-        st.dataframe(df_show, use_container_width=True, hide_index=True)
+        st.dataframe(df_show, width="stretch", hide_index=True)
     else:
         st.info("Brak danych miesięcznych")
 
@@ -1175,10 +1175,12 @@ with tab_tygodnie:
                    f"{int(bilans_val):+,}".replace(",", " ") if bilans_val not in (None, "", 0) else "—")
         wk4.metric("👟 Kroki",
                    f"{int(curr_w.get('Kroki suma', 0)):,}".replace(",", " ") if curr_w.get("Kroki suma") else "—")
+        _biegi_ile = int(curr_w.get("Biegi") or 0)
+        _biegi_km  = float(curr_w.get("Biegi km") or 0)
         wk5.metric("🏃 Biegi",
-                   f"{int(curr_w.get('Biegi', 0))}× / {float(curr_w.get('Biegi km') or 0):.1f} km" if curr_w.get("Biegi") else "—")
-        wk6.metric("💪 Siłownia",
-                   f"{int(curr_w.get('Siłownia', 0))}×" if curr_w.get("Siłownia") else "—")
+                   f"{_biegi_ile}× / {_biegi_km:.1f} km" if _biegi_ile else "—")
+        _sil = int(curr_w.get("Siłownia") or 0)
+        wk6.metric("💪 Siłownia", f"{_sil}×" if _sil else "—")
 
         # Wykres spalonych kcal per tydzień
         st.markdown('<div class="sec">📊 Spalone kcal per tydzień</div>', unsafe_allow_html=True)
@@ -1192,7 +1194,7 @@ with tab_tygodnie:
                     hovertemplate="%{x}: <b>%{y:,.0f} kcal</b> spalonych<extra></extra>"))
                 sparkline_layout(fig_wk, "🔥 Spalone kcal (suma tygodnia)")
                 fig_wk.update_layout(showlegend=False)
-                st.plotly_chart(fig_wk, use_container_width=True)
+                st.plotly_chart(fig_wk, width="stretch")
         with wch_b:
             if "Bilans kcal suma" in df_weeks.columns:
                 df_bil_plot = df_weeks[df_weeks["Bilans kcal suma"].apply(lambda x: isinstance(x, (int, float)) and x != 0)].tail(16)
@@ -1205,7 +1207,7 @@ with tab_tygodnie:
                     fig_bil.add_hline(y=0, line_color="#94A3B8", line_width=1)
                     sparkline_layout(fig_bil, "⚖️ Bilans kcal (suma tygodnia) — zielony = deficyt")
                     fig_bil.update_layout(showlegend=False)
-                    st.plotly_chart(fig_bil, use_container_width=True)
+                    st.plotly_chart(fig_bil, width="stretch")
 
         # Tabela tygodni
         st.markdown('<div class="sec">📋 Tabela tygodni (od najnowszego)</div>', unsafe_allow_html=True)
@@ -1217,7 +1219,7 @@ with tab_tygodnie:
         ] if c in df_weeks.columns]
         df_weeks_show = df_weeks[display_w].iloc[::-1].reset_index(drop=True).copy()
         df_weeks_show = df_weeks_show.astype(str).replace("nan", "—").replace("<NA>", "—").replace("None", "—").replace("0", "—")
-        st.dataframe(df_weeks_show, use_container_width=True, hide_index=True)
+        st.dataframe(df_weeks_show, width="stretch", hide_index=True)
     else:
         st.info("Brak danych tygodniowych")
 
