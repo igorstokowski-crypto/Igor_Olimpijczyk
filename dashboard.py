@@ -1187,32 +1187,62 @@ with tab_tygodnie:
         _sil = _wi(curr_w.get("Siłownia"))
         wk6.metric("💪 Siłownia", f"{_sil}×" if _sil else "—")
 
-        # Wykres spalonych kcal per tydzień
-        st.markdown('<div class="sec">📊 Spalone kcal per tydzień</div>', unsafe_allow_html=True)
-        wch_a, wch_b = st.columns(2)
-        with wch_a:
-            df_kcal_plot = df_weeks[df_weeks["Spalone kcal suma"].apply(lambda x: isinstance(x, (int, float)) and x > 0)].tail(16) if "Spalone kcal suma" in df_weeks.columns else pd.DataFrame()
+        def week_chart_layout(fig, title):
+            fig.update_layout(
+                height=280, margin=dict(l=0, r=0, t=32, b=60),
+                plot_bgcolor="white", paper_bgcolor="white",
+                showlegend=False,
+                title=dict(text=title, font=dict(size=13, color="#334155"), x=0),
+                xaxis=dict(showgrid=False, tickangle=-35, tickfont=dict(size=10), type="category"),
+                yaxis=dict(gridcolor="#f0f0f0", tickfont=dict(size=10)),
+                hovermode="x unified",
+            )
+
+        # Wykres spalonych kcal per tydzień — pełna szerokość
+        st.markdown('<div class="sec">🔥 Spalone kcal per tydzień</div>', unsafe_allow_html=True)
+        if "Spalone kcal suma" in df_weeks.columns:
+            df_kcal_plot = df_weeks[df_weeks["Spalone kcal suma"].apply(
+                lambda x: isinstance(x, (int, float)) and x > 0)].tail(16)
             if not df_kcal_plot.empty:
+                avg_kcal = df_kcal_plot["Spalone kcal suma"].mean()
+                bar_colors = ["#F97316" if v >= avg_kcal else "#FCA5A5"
+                              for v in df_kcal_plot["Spalone kcal suma"]]
                 fig_wk = go.Figure(go.Bar(
-                    x=df_kcal_plot["Tydzień"], y=df_kcal_plot["Spalone kcal suma"],
-                    marker_color="#EF4444",
-                    hovertemplate="%{x}: <b>%{y:,.0f} kcal</b> spalonych<extra></extra>"))
-                sparkline_layout(fig_wk, "🔥 Spalone kcal (suma tygodnia)")
-                fig_wk.update_layout(showlegend=False)
+                    x=df_kcal_plot["Tydzień"],
+                    y=df_kcal_plot["Spalone kcal suma"],
+                    marker=dict(color=bar_colors),
+                    text=[f"{int(v):,}".replace(",", " ") for v in df_kcal_plot["Spalone kcal suma"]],
+                    textposition="outside",
+                    textfont=dict(size=10),
+                    hovertemplate="%{x}<br><b>%{y:,.0f} kcal</b> spalonych<extra></extra>"))
+                fig_wk.add_hline(y=avg_kcal, line_dash="dot", line_color="#94A3B8",
+                                 annotation_text=f"śr. {int(avg_kcal):,}".replace(",", " "),
+                                 annotation_position="top right",
+                                 annotation_font=dict(size=10, color="#94A3B8"))
+                week_chart_layout(fig_wk, "")
+                fig_wk.update_layout(height=320)
                 st.plotly_chart(fig_wk, width="stretch")
-        with wch_b:
-            if "Bilans kcal suma" in df_weeks.columns:
-                df_bil_plot = df_weeks[df_weeks["Bilans kcal suma"].apply(lambda x: isinstance(x, (int, float)) and x != 0)].tail(16)
-                if not df_bil_plot.empty:
-                    colors_bil = ["#10B981" if v < 0 else "#EF4444" for v in df_bil_plot["Bilans kcal suma"]]
-                    fig_bil = go.Figure(go.Bar(
-                        x=df_bil_plot["Tydzień"], y=df_bil_plot["Bilans kcal suma"],
-                        marker_color=colors_bil,
-                        hovertemplate="%{x}: bilans <b>%{y:+,.0f} kcal</b><extra></extra>"))
-                    fig_bil.add_hline(y=0, line_color="#94A3B8", line_width=1)
-                    sparkline_layout(fig_bil, "⚖️ Bilans kcal (suma tygodnia) — zielony = deficyt")
-                    fig_bil.update_layout(showlegend=False)
-                    st.plotly_chart(fig_bil, width="stretch")
+
+        # Bilans kcal — pełna szerokość
+        if "Bilans kcal suma" in df_weeks.columns:
+            df_bil_plot = df_weeks[df_weeks["Bilans kcal suma"].apply(
+                lambda x: isinstance(x, (int, float)) and x != 0)].tail(16)
+            if not df_bil_plot.empty:
+                st.markdown('<div class="sec">⚖️ Bilans kcal per tydzień (zielony = deficyt)</div>', unsafe_allow_html=True)
+                colors_bil = ["#10B981" if v < 0 else "#EF4444"
+                              for v in df_bil_plot["Bilans kcal suma"]]
+                fig_bil = go.Figure(go.Bar(
+                    x=df_bil_plot["Tydzień"],
+                    y=df_bil_plot["Bilans kcal suma"],
+                    marker=dict(color=colors_bil),
+                    text=[f"{int(v):+,}".replace(",", " ") for v in df_bil_plot["Bilans kcal suma"]],
+                    textposition="outside",
+                    textfont=dict(size=10),
+                    hovertemplate="%{x}<br>bilans <b>%{y:+,.0f} kcal</b><extra></extra>"))
+                fig_bil.add_hline(y=0, line_color="#64748B", line_width=1.5)
+                week_chart_layout(fig_bil, "")
+                fig_bil.update_layout(height=320)
+                st.plotly_chart(fig_bil, width="stretch")
 
         # Tabela tygodni
         st.markdown('<div class="sec">📋 Tabela tygodni (od najnowszego)</div>', unsafe_allow_html=True)
