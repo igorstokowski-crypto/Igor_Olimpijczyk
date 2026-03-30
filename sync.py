@@ -1174,12 +1174,20 @@ def main():
         print(f"  ⚖️  Aktualna waga z profilu: {current_weight} kg")
 
     existing_dz = get_existing_keys(sheets, "Dziennik")
+    garmin_failed = []
     print("\n📅 Dane dzienne...")
     for date_str in dates:
         if not should_refresh(date_str, existing_dz):
             continue
         weight_for_day = current_weight if date_str == today else None
         row = fetch_garmin_daily(garmin, date_str, weight_for_day)
+        has_data = bool(row.get("Kroki") or row.get("Kalorie_calkowite") or row.get("Sen_h"))
+        if not has_data and date_str in existing_dz:
+            print(f"  {date_str}  ⚠️ brak danych z Garmin — pomijam (nie nadpisuję istniejących)")
+            garmin_failed.append(date_str)
+            continue
+        if not has_data:
+            garmin_failed.append(date_str)
         new["Dziennik"].append(row)
         print(f"  {date_str}  {row.get('Kroki', 0):>6} kroków  "
               f"sen: {row.get('Sen_h', 0)}h  "
@@ -1290,6 +1298,12 @@ def main():
     print(f"\n{'='*55}")
     print(f"  ✅ Gotowe!  Następna sync od: {today_str}")
     print(f"{'='*55}")
+
+    if garmin_failed:
+        print(f"\n❌ GARMIN: brak danych dla {len(garmin_failed)} dni: {garmin_failed}")
+        print("   Prawdopodobna przyczyna: wygasła sesja (GARTH_SESSION) lub zegarek nie zsynchronizowany.")
+        if len(garmin_failed) >= 3:
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
