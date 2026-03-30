@@ -1176,7 +1176,7 @@ with tab_tygodnie:
         wk4.metric("👟 Kroki",
                    f"{int(curr_w.get('Kroki suma', 0)):,}".replace(",", " ") if curr_w.get("Kroki suma") else "—")
         wk5.metric("🏃 Biegi",
-                   f"{int(curr_w.get('Biegi', 0))}× / {curr_w.get('Biegi km', 0):.1f} km" if curr_w.get("Biegi") else "—")
+                   f"{int(curr_w.get('Biegi', 0))}× / {float(curr_w.get('Biegi km') or 0):.1f} km" if curr_w.get("Biegi") else "—")
         wk6.metric("💪 Siłownia",
                    f"{int(curr_w.get('Siłownia', 0))}×" if curr_w.get("Siłownia") else "—")
 
