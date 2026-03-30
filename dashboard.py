@@ -1170,16 +1170,21 @@ with tab_tygodnie:
                    delta=(f"{int(curr_w.get('Spalone kcal suma', 0)) - int(prev_w.get('Spalone kcal suma', 0)):+,}".replace(",", " ") + " vs poprzedni") if prev_w is not None and curr_w.get("Spalone kcal suma") and prev_w.get("Spalone kcal suma") else None)
         wk2.metric("🥗 Spożyte kcal",
                    f"{int(curr_w.get('Spożyte kcal suma', 0)):,}".replace(",", " ") if curr_w.get("Spożyte kcal suma") else "—")
+        def _wi(v, default=0):
+            return int(v) if pd.notna(v) and v else default
+        def _wf(v, default=0.0):
+            return float(v) if pd.notna(v) and v else default
+
         bilans_val = curr_w.get("Bilans kcal suma")
         wk3.metric("⚖️ Bilans kcal",
-                   f"{int(bilans_val):+,}".replace(",", " ") if bilans_val not in (None, "", 0) else "—")
+                   f"{int(bilans_val):+,}".replace(",", " ") if pd.notna(bilans_val) and bilans_val not in (None, "", 0) else "—")
         wk4.metric("👟 Kroki",
-                   f"{int(curr_w.get('Kroki suma', 0)):,}".replace(",", " ") if curr_w.get("Kroki suma") else "—")
-        _biegi_ile = int(curr_w.get("Biegi") or 0)
-        _biegi_km  = float(curr_w.get("Biegi km") or 0)
+                   f"{_wi(curr_w.get('Kroki suma')):,}".replace(",", " ") if _wi(curr_w.get("Kroki suma")) else "—")
+        _biegi_ile = _wi(curr_w.get("Biegi"))
+        _biegi_km  = _wf(curr_w.get("Biegi km"))
         wk5.metric("🏃 Biegi",
                    f"{_biegi_ile}× / {_biegi_km:.1f} km" if _biegi_ile else "—")
-        _sil = int(curr_w.get("Siłownia") or 0)
+        _sil = _wi(curr_w.get("Siłownia"))
         wk6.metric("💪 Siłownia", f"{_sil}×" if _sil else "—")
 
         # Wykres spalonych kcal per tydzień
