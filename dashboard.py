@@ -440,8 +440,8 @@ if not hist_dz.empty and not hist_fit.empty and "Kalorie_calkowite" in hist_dz.c
 # ══════════════════════════════════════════════════════════════════════════════
 
 st.markdown('<div class="main-pad">', unsafe_allow_html=True)
-tab_dzis, tab_hist, tab_rekordy, tab_miesiace = st.tabs([
-    "📊  Dziś", "📈  Historia", "🏆  Rekordy", "📅  Miesiące"
+tab_dzis, tab_hist, tab_rekordy, tab_miesiace, tab_tygodnie = st.tabs([
+    "📊  Dziś", "📈  Historia", "🏆  Rekordy", "📅  Miesiące", "📆  Tygodnie"
 ])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1068,6 +1068,158 @@ with tab_miesiace:
         st.info("Brak danych miesięcznych")
 
 st.markdown('</div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  TAB 5 — TYGODNIE
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_tygodnie:
+    week_rows = []
+
+    if not hist_dz.empty:
+        dz_w = hist_dz.copy()
+        dz_w["W"] = dz_w["Data"].dt.to_period("W-SUN")
+        for w, grp in dz_w.groupby("W"):
+            start = grp["Data"].min()
+            end   = grp["Data"].max()
+            r = {
+                "Tydzień":               f"{start.strftime('%d.%m')}–{end.strftime('%d.%m.%Y')}",
+                "_key":                  str(w),
+                "Spalone kcal suma":     round(grp["Kalorie_calkowite"].dropna().sum())   if "Kalorie_calkowite" in grp else 0,
+                "Spalone kcal śr/dzień": round(grp["Kalorie_calkowite"].dropna().mean())  if "Kalorie_calkowite" in grp else 0,
+                "Kroki suma":            int(grp["Kroki"].dropna().sum())                 if "Kroki" in grp else 0,
+                "Kroki śr/dzień":        round(grp["Kroki"].dropna().mean())              if "Kroki" in grp else 0,
+                "Sen śr (h)":            round(grp["Sen_h"].dropna().mean(), 2)           if "Sen_h" in grp else 0,
+                "HR spocz. śr":          round(grp["HR_spoczynkowe"].dropna().mean(), 1) if "HR_spoczynkowe" in grp else 0,
+                "Intens. min":           int(grp["Intensywne_min"].dropna().sum())        if "Intensywne_min" in grp else 0,
+            }
+            week_rows.append(r)
+
+    if not hist_fit.empty:
+        fit_w = hist_fit.copy()
+        fit_w["W"] = fit_w["_dt"].dt.to_period("W-SUN")
+        for w, grp in fit_w.groupby("W"):
+            key = str(w)
+            existing = next((r for r in week_rows if r["_key"] == key), None)
+            if not existing:
+                existing = {"Tydzień": key, "_key": key}
+                week_rows.append(existing)
+            if "Kcal" in grp.columns:
+                existing["Spożyte kcal suma"]    = round(grp["Kcal"].dropna().sum())
+                existing["Spożyte kcal śr/dzień"] = round(grp["Kcal"].dropna().mean())
+            if "Bialko_g" in grp.columns:
+                existing["Białko śr (g)"] = round(grp["Bialko_g"].dropna().mean(), 1)
+
+    # Bilans tygodniowy
+    if not hist_dz.empty and not hist_fit.empty:
+        merged_w = hist_dz[["Data", "Kalorie_calkowite"]].merge(
+            hist_fit[["_dt", "Kcal"]].rename(columns={"_dt": "Data"}),
+            on="Data", how="inner"
+        )
+        if not merged_w.empty:
+            merged_w["Bilans"] = merged_w["Kalorie_calkowite"] - merged_w["Kcal"]
+            merged_w["W"] = merged_w["Data"].dt.to_period("W-SUN")
+            for w, grp in merged_w.groupby("W"):
+                key = str(w)
+                existing = next((r for r in week_rows if r["_key"] == key), None)
+                if existing:
+                    existing["Bilans kcal suma"]    = round(grp["Bilans"].sum())
+                    existing["Bilans kcal śr/dzień"] = round(grp["Bilans"].mean())
+
+    if not df_akt.empty and "Data" in df_akt.columns:
+        akt_w = df_akt.copy()
+        akt_w["_dt2"] = pd.to_datetime(akt_w["Data"], errors="coerce")
+        akt_w["W"] = akt_w["_dt2"].dt.to_period("W-SUN")
+        for w, grp in akt_w.groupby("W"):
+            key = str(w)
+            existing = next((r for r in week_rows if r["_key"] == key), None)
+            if not existing:
+                existing = {"Tydzień": key, "_key": key}
+                week_rows.append(existing)
+            typs = grp["Typ"].str.lower() if "Typ" in grp else pd.Series([], dtype=str)
+            existing["Treningi"] = len(grp)
+            existing["Biegi"]    = int(typs.isin({"running","trail_running","treadmill_running"}).sum())
+            if "Dystans_km" in grp.columns:
+                existing["Biegi km"] = round(float(grp.loc[typs.isin({"running","trail_running","treadmill_running"}), "Dystans_km"].apply(n).sum()), 1)
+
+    if not df_hevy.empty and "ID_treningu" in df_hevy.columns:
+        hv_w = df_hevy.copy()
+        dc = "Data_start" if "Data_start" in hv_w.columns else "Data"
+        if dc in hv_w.columns:
+            hv_w["_dt2"] = pd.to_datetime(hv_w[dc], errors="coerce")
+            hv_w["W"] = hv_w["_dt2"].dt.to_period("W-SUN")
+            for w, grp in hv_w.groupby("W"):
+                key = str(w)
+                existing = next((r for r in week_rows if r["_key"] == key), None)
+                if not existing:
+                    existing = {"Tydzień": key, "_key": key}
+                    week_rows.append(existing)
+                existing["Siłownia"] = grp["ID_treningu"].nunique()
+
+    df_weeks = pd.DataFrame(sorted(week_rows, key=lambda x: x.get("_key", "")))
+    if "_key" in df_weeks.columns:
+        df_weeks = df_weeks.drop(columns=["_key"])
+
+    if not df_weeks.empty:
+        # KPI bieżący tydzień
+        curr_w = df_weeks.iloc[-1]
+        prev_w = df_weeks.iloc[-2] if len(df_weeks) > 1 else None
+        st.markdown(f'<div class="sec">📆 Bieżący tydzień — {curr_w["Tydzień"]}</div>', unsafe_allow_html=True)
+        wk1, wk2, wk3, wk4, wk5, wk6 = st.columns(6)
+        wk1.metric("🔥 Spalone kcal",
+                   f"{int(curr_w.get('Spalone kcal suma', 0)):,}".replace(",", " ") if curr_w.get("Spalone kcal suma") else "—",
+                   delta=(f"{int(curr_w.get('Spalone kcal suma', 0)) - int(prev_w.get('Spalone kcal suma', 0)):+,}".replace(",", " ") + " vs poprzedni") if prev_w is not None and curr_w.get("Spalone kcal suma") and prev_w.get("Spalone kcal suma") else None)
+        wk2.metric("🥗 Spożyte kcal",
+                   f"{int(curr_w.get('Spożyte kcal suma', 0)):,}".replace(",", " ") if curr_w.get("Spożyte kcal suma") else "—")
+        bilans_val = curr_w.get("Bilans kcal suma")
+        wk3.metric("⚖️ Bilans kcal",
+                   f"{int(bilans_val):+,}".replace(",", " ") if bilans_val not in (None, "", 0) else "—")
+        wk4.metric("👟 Kroki",
+                   f"{int(curr_w.get('Kroki suma', 0)):,}".replace(",", " ") if curr_w.get("Kroki suma") else "—")
+        wk5.metric("🏃 Biegi",
+                   f"{int(curr_w.get('Biegi', 0))}× / {curr_w.get('Biegi km', 0):.1f} km" if curr_w.get("Biegi") else "—")
+        wk6.metric("💪 Siłownia",
+                   f"{int(curr_w.get('Siłownia', 0))}×" if curr_w.get("Siłownia") else "—")
+
+        # Wykres spalonych kcal per tydzień
+        st.markdown('<div class="sec">📊 Spalone kcal per tydzień</div>', unsafe_allow_html=True)
+        wch_a, wch_b = st.columns(2)
+        with wch_a:
+            df_kcal_plot = df_weeks[df_weeks["Spalone kcal suma"].apply(lambda x: isinstance(x, (int, float)) and x > 0)].tail(16) if "Spalone kcal suma" in df_weeks.columns else pd.DataFrame()
+            if not df_kcal_plot.empty:
+                fig_wk = go.Figure(go.Bar(
+                    x=df_kcal_plot["Tydzień"], y=df_kcal_plot["Spalone kcal suma"],
+                    marker_color="#EF4444",
+                    hovertemplate="%{x}: <b>%{y:,.0f} kcal</b> spalonych<extra></extra>"))
+                sparkline_layout(fig_wk, "🔥 Spalone kcal (suma tygodnia)")
+                fig_wk.update_layout(showlegend=False)
+                st.plotly_chart(fig_wk, use_container_width=True)
+        with wch_b:
+            if "Bilans kcal suma" in df_weeks.columns:
+                df_bil_plot = df_weeks[df_weeks["Bilans kcal suma"].apply(lambda x: isinstance(x, (int, float)) and x != 0)].tail(16)
+                if not df_bil_plot.empty:
+                    colors_bil = ["#10B981" if v < 0 else "#EF4444" for v in df_bil_plot["Bilans kcal suma"]]
+                    fig_bil = go.Figure(go.Bar(
+                        x=df_bil_plot["Tydzień"], y=df_bil_plot["Bilans kcal suma"],
+                        marker_color=colors_bil,
+                        hovertemplate="%{x}: bilans <b>%{y:+,.0f} kcal</b><extra></extra>"))
+                    fig_bil.add_hline(y=0, line_color="#94A3B8", line_width=1)
+                    sparkline_layout(fig_bil, "⚖️ Bilans kcal (suma tygodnia) — zielony = deficyt")
+                    fig_bil.update_layout(showlegend=False)
+                    st.plotly_chart(fig_bil, use_container_width=True)
+
+        # Tabela tygodni
+        st.markdown('<div class="sec">📋 Tabela tygodni (od najnowszego)</div>', unsafe_allow_html=True)
+        display_w = [c for c in [
+            "Tydzień", "Spalone kcal suma", "Spalone kcal śr/dzień",
+            "Spożyte kcal suma", "Spożyte kcal śr/dzień", "Bilans kcal suma",
+            "Kroki suma", "Kroki śr/dzień", "Sen śr (h)", "HR spocz. śr",
+            "Intens. min", "Białko śr (g)", "Treningi", "Biegi", "Biegi km", "Siłownia"
+        ] if c in df_weeks.columns]
+        df_weeks_show = df_weeks[display_w].iloc[::-1].reset_index(drop=True).copy()
+        df_weeks_show = df_weeks_show.astype(str).replace("nan", "—").replace("<NA>", "—").replace("None", "—").replace("0", "—")
+        st.dataframe(df_weeks_show, use_container_width=True, hide_index=True)
+    else:
+        st.info("Brak danych tygodniowych")
 
 # Footer
 st.markdown(f"""

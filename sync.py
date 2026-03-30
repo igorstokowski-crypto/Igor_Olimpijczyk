@@ -1037,6 +1037,109 @@ def build_analytics(sheets) -> dict[str, pd.DataFrame]:
     else:
         result["Bilans kcal"] = pd.DataFrame()
 
+    # ══════════════════════════════════════════════════
+    # 5. TYGODNIE — zestawienie per tydzień (pon–nd)
+    # ══════════════════════════════════════════════════
+    tygodnie_rows = []
+
+    if not df_dz.empty:
+        df_dz["Tydzien"] = df_dz["Data"].dt.to_period("W-SUN")
+
+        tyg_map = {}
+        for tw, grp in df_dz.groupby("Tydzien"):
+            key = str(tw)
+            start = grp["Data"].min()
+            end   = grp["Data"].max()
+            tyg_map[key] = {
+                "_start": start,
+                "_end":   end,
+                "Dni":    len(grp),
+                "Kroki_suma":      grp["Kroki"].sum() if "Kroki" in grp else 0,
+                "Kroki_sr":        grp["Kroki"].mean() if "Kroki" in grp else 0,
+                "Spalone_kcal_sr": grp["Kalorie_calkowite"].mean() if "Kalorie_calkowite" in grp else 0,
+                "Spalone_kcal_suma": grp["Kalorie_calkowite"].sum() if "Kalorie_calkowite" in grp else 0,
+                "Sen_sr":          grp["Sen_h"].mean() if "Sen_h" in grp else 0,
+                "HR_sr":           grp["HR_spoczynkowe"].mean() if "HR_spoczynkowe" in grp else 0,
+                "Intensywne_suma": grp["Intensywne_min"].sum() if "Intensywne_min" in grp else 0,
+            }
+
+        if not df_fit.empty:
+            df_fit["Tydzien"] = df_fit["Data"].dt.to_period("W-SUN")
+            for tw, grp in df_fit.groupby("Tydzien"):
+                key = str(tw)
+                if key not in tyg_map:
+                    tyg_map[key] = {}
+                tyg_map[key]["Spozyto_kcal_sr"]  = grp["Kcal"].mean() if "Kcal" in grp else 0
+                tyg_map[key]["Spozyto_kcal_suma"] = grp["Kcal"].sum()  if "Kcal" in grp else 0
+                tyg_map[key]["Bialko_sr"]          = grp["Bialko_g"].mean() if "Bialko_g" in grp else 0
+
+            # Bilans tygodniowy — tylko dni gdzie oba źródła mają dane
+            merged_tyg = df_dz[["Data", "Kalorie_calkowite"]].merge(
+                df_fit[["Data", "Kcal"]], on="Data", how="inner"
+            )
+            if not merged_tyg.empty:
+                merged_tyg["Bilans"] = merged_tyg["Kalorie_calkowite"] - merged_tyg["Kcal"]
+                merged_tyg["Tydzien"] = merged_tyg["Data"].dt.to_period("W-SUN")
+                for tw, grp in merged_tyg.groupby("Tydzien"):
+                    key = str(tw)
+                    if key not in tyg_map:
+                        tyg_map[key] = {}
+                    tyg_map[key]["Bilans_suma"]  = grp["Bilans"].sum()
+                    tyg_map[key]["Bilans_sr"]    = grp["Bilans"].mean()
+
+        if not df_akt.empty:
+            df_akt["Tydzien"] = df_akt["Data"].dt.to_period("W-SUN")
+            for tw, grp in df_akt.groupby("Tydzien"):
+                key = str(tw)
+                if key not in tyg_map:
+                    tyg_map[key] = {}
+                typ = grp["Typ"].str.lower() if "Typ" in grp else pd.Series([], dtype=str)
+                tyg_map[key]["Treningi_ile"]   = len(grp)
+                tyg_map[key]["Km_laczn"]       = grp["Dystans_km"].sum() if "Dystans_km" in grp else 0
+                tyg_map[key]["Biegi_ile"]       = int(typ.isin(RUNNING_TYPES).sum())
+                tyg_map[key]["Biegi_km"]        = float(grp.loc[typ.isin(RUNNING_TYPES), "Dystans_km"].sum()) if "Dystans_km" in grp else 0
+
+        if not df_hevy.empty and "ID_treningu" in df_hevy.columns:
+            dc = "Data_start" if "Data_start" in df_hevy.columns else "Data"
+            if dc in df_hevy.columns:
+                df_hevy["_dt2"] = pd.to_datetime(df_hevy[dc], errors="coerce")
+                df_hevy["Tydzien"] = df_hevy["_dt2"].dt.to_period("W-SUN")
+                for tw, grp in df_hevy.groupby("Tydzien"):
+                    key = str(tw)
+                    if key not in tyg_map:
+                        tyg_map[key] = {}
+                    tyg_map[key]["Silownia_ile"] = grp["ID_treningu"].nunique()
+
+        for key in sorted(tyg_map.keys()):
+            d = tyg_map[key]
+            start = d.get("_start")
+            end   = d.get("_end")
+            label = f"{start.strftime('%d.%m') if pd.notna(start) else '?'}–{end.strftime('%d.%m.%Y') if pd.notna(end) else '?'}"
+            bilans = d.get("Bilans_suma")
+            tygodnie_rows.append({
+                "Tydzień":             label,
+                "Dni z danymi":        d.get("Dni", 0),
+                "Kroki suma":          round(d.get("Kroki_suma", 0)),
+                "Kroki śr/dzień":      round(d.get("Kroki_sr", 0)),
+                "Spalone kcal suma":   round(d.get("Spalone_kcal_suma", 0)),
+                "Spalone kcal śr/dzień": round(d.get("Spalone_kcal_sr", 0)),
+                "Spożyte kcal suma":   round(d.get("Spozyto_kcal_suma", 0)),
+                "Spożyte kcal śr/dzień": round(d.get("Spozyto_kcal_sr", 0)),
+                "Bilans kcal suma":    round(bilans) if bilans is not None and not np.isnan(bilans) else "",
+                "Bilans kcal śr/dzień": round(d.get("Bilans_sr", float("nan"))) if "Bilans_sr" in d and not np.isnan(d["Bilans_sr"]) else "",
+                "Sen śr (h)":          round(d.get("Sen_sr", 0), 2),
+                "HR spocz. śr":        round(d.get("HR_sr", 0), 1),
+                "Intens. min suma":    round(d.get("Intensywne_suma", 0)),
+                "Białko śr (g)":       round(d.get("Bialko_sr", 0), 1),
+                "Treningi":            d.get("Treningi_ile", 0),
+                "Km łącznie":          round(d.get("Km_laczn", 0), 1),
+                "Biegi (ile)":         d.get("Biegi_ile", 0),
+                "Biegi km":            round(d.get("Biegi_km", 0), 1),
+                "Siłownia (ile)":      d.get("Silownia_ile", 0),
+            })
+
+    result["Tygodnie"] = pd.DataFrame(tygodnie_rows) if tygodnie_rows else pd.DataFrame()
+
     return result
 
 
@@ -1189,6 +1292,7 @@ def main():
         print(f"  ⚖️  Aktualna waga z profilu: {current_weight} kg")
 
     existing_dz = get_existing_keys(sheets, "Dziennik")
+    garmin_failed = []
     print("\n📅 Dane dzienne...")
     for date_str in dates:
         if not should_refresh(date_str, existing_dz):
@@ -1198,7 +1302,10 @@ def main():
         has_data = bool(row.get("Kroki") or row.get("Kalorie_calkowite") or row.get("Sen_h"))
         if not has_data and date_str in existing_dz:
             print(f"  {date_str}  ⚠️ brak danych z Garmin — pomijam (nie nadpisuję istniejących)")
+            garmin_failed.append(date_str)
             continue
+        if not has_data:
+            garmin_failed.append(date_str)
         new["Dziennik"].append(row)
         print(f"  {date_str}  {row.get('Kroki', 0):>6} kroków  "
               f"sen: {row.get('Sen_h', 0)}h  "
@@ -1309,6 +1416,12 @@ def main():
     print(f"\n{'='*55}")
     print(f"  ✅ Gotowe!  Następna sync od: {today_str}")
     print(f"{'='*55}")
+
+    if garmin_failed:
+        print(f"\n❌ GARMIN: brak danych dla {len(garmin_failed)} dni: {garmin_failed}")
+        print("   Prawdopodobna przyczyna: wygasła sesja (GARTH_SESSION) lub zegarek nie zsynchronizowany.")
+        if len(garmin_failed) >= 3:
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
