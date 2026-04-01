@@ -135,6 +135,14 @@ def n(v, d=None):
     try: return float(str(v).replace(",", ".").strip())
     except: return d
 
+def nsum(s):
+    v = pd.to_numeric(s, errors="coerce").dropna()
+    return float(v.sum()) if len(v) else 0.0
+
+def nmean(s):
+    v = pd.to_numeric(s, errors="coerce").dropna()
+    return float(v.mean()) if len(v) else float("nan")
+
 def fmt(v, suf="", dec=0):
     if v is None: return "—"
     return f"{v:,.{dec}f}{suf}".replace(",", " ")
@@ -467,7 +475,7 @@ with tab_dzis:
     month_steps = 0
     if not dz.empty and "Kroki" in dz.columns:
         _mdf = dz[dz["Data"].dt.strftime("%Y-%m") == _chosen_ym].copy()
-        month_steps = int(_mdf["Kroki"].apply(n).dropna().sum())
+        month_steps = int(nsum(_mdf["Kroki"]))
 
     month_km = 0.0
     month_gym = 0
@@ -490,7 +498,7 @@ with tab_dzis:
         month_bike = int(_typs.isin({"cycling","road_biking","indoor_cycling"}).sum())
         month_swim = int(_typs.isin({"swimming","lap_swimming","open_water_swimming"}).sum())
         if "Dystans_km" in _adf.columns:
-            month_km = float(_adf["Dystans_km"].apply(n).dropna().sum())
+            month_km = nsum(_adf["Dystans_km"])
 
     month_kardio = month_run + month_bike + month_swim
 
@@ -930,16 +938,18 @@ with tab_miesiace:
         for m, grp in dz_m.groupby("M"):
             row = {"Miesiąc": str(m)}
             if "Kroki" in grp.columns:
-                row["Kroki suma"]    = int(grp["Kroki"].dropna().sum())
-                row["Kroki śr/dzień"]= round(grp["Kroki"].dropna().mean())
+                row["Kroki suma"]    = int(nsum(grp["Kroki"]))
+                _km = nmean(grp["Kroki"])
+                row["Kroki śr/dzień"]= round(_km) if pd.notna(_km) else 0
             if "Sen_h" in grp.columns:
-                row["Sen śr (h)"]    = round(grp["Sen_h"].dropna().mean(), 2)
+                _sm = nmean(grp["Sen_h"])
+                row["Sen śr (h)"]    = round(_sm, 2) if pd.notna(_sm) else 0
             if "HR_spoczynkowe" in grp.columns:
-                hr_vals = grp["HR_spoczynkowe"].dropna()
+                hr_vals = pd.to_numeric(grp["HR_spoczynkowe"], errors="coerce").dropna()
                 hr_vals = hr_vals[hr_vals > 0]
-                row["HR spocz. śr"]  = round(hr_vals.mean(), 1) if len(hr_vals) else 0
+                row["HR spocz. śr"]  = round(float(hr_vals.mean()), 1) if len(hr_vals) else 0
             if "Intensywne_min" in grp.columns:
-                row["Intens. min"]   = int(grp["Intensywne_min"].dropna().sum())
+                row["Intens. min"]   = int(nsum(grp["Intensywne_min"]))
             month_rows.append(row)
 
     if not hist_fit.empty:
@@ -952,7 +962,8 @@ with tab_miesiace:
                 existing = {"Miesiąc": ms}
                 month_rows.append(existing)
             if "Kcal" in grp.columns:
-                existing["Kcal śr/dzień"] = round(grp["Kcal"].dropna().mean())
+                _km2 = nmean(grp["Kcal"])
+                existing["Kcal śr/dzień"] = round(_km2) if pd.notna(_km2) else 0
 
     if not df_akt.empty and "Data" in df_akt.columns and "Typ" in df_akt.columns:
         akt_m = df_akt.copy()
@@ -968,7 +979,7 @@ with tab_miesiace:
             existing["Biegi"]   = int(typs.isin({"running","trail_running","treadmill_running"}).sum())
             existing["Kardio"]  = int(typs.isin({"running","trail_running","treadmill_running","cycling","road_cycling","indoor_cycling","swimming","lap_swimming","open_water_swimming","walking","hiking"}).sum())
             if "Dystans_km" in grp.columns:
-                existing["Km łącznie"] = round(float(grp["Dystans_km"].apply(n).dropna().sum()), 1)
+                existing["Km łącznie"] = round(nsum(grp["Dystans_km"]), 1)
 
     if not df_hevy.empty and "ID_treningu" in df_hevy.columns:
         hv_m = df_hevy.copy()
@@ -1084,13 +1095,13 @@ with tab_tygodnie:
             r = {
                 "Tydzień":               f"{start.strftime('%d.%m')}–{end.strftime('%d.%m.%Y')}",
                 "_key":                  str(w),
-                "Spalone kcal suma":     round(grp["Kalorie_calkowite"].dropna().sum())   if "Kalorie_calkowite" in grp else 0,
-                "Spalone kcal śr/dzień": round(grp["Kalorie_calkowite"].dropna().mean())  if "Kalorie_calkowite" in grp else 0,
-                "Kroki suma":            int(grp["Kroki"].dropna().sum())                 if "Kroki" in grp else 0,
-                "Kroki śr/dzień":        round(grp["Kroki"].dropna().mean())              if "Kroki" in grp else 0,
-                "Sen śr (h)":            round(grp["Sen_h"].dropna().mean(), 2)           if "Sen_h" in grp else 0,
-                "HR spocz. śr":          round(grp["HR_spoczynkowe"].dropna().mean(), 1) if "HR_spoczynkowe" in grp else 0,
-                "Intens. min":           int(grp["Intensywne_min"].dropna().sum())        if "Intensywne_min" in grp else 0,
+                "Spalone kcal suma":     round(nsum(grp["Kalorie_calkowite"]))                                        if "Kalorie_calkowite" in grp else 0,
+                "Spalone kcal śr/dzień": (lambda m: round(m) if pd.notna(m) else 0)(nmean(grp["Kalorie_calkowite"])) if "Kalorie_calkowite" in grp else 0,
+                "Kroki suma":            int(nsum(grp["Kroki"]))                                                      if "Kroki" in grp else 0,
+                "Kroki śr/dzień":        (lambda m: round(m) if pd.notna(m) else 0)(nmean(grp["Kroki"]))             if "Kroki" in grp else 0,
+                "Sen śr (h)":            (lambda m: round(m, 2) if pd.notna(m) else 0)(nmean(grp["Sen_h"]))          if "Sen_h" in grp else 0,
+                "HR spocz. śr":          (lambda m: round(m, 1) if pd.notna(m) else 0)(nmean(grp["HR_spoczynkowe"])) if "HR_spoczynkowe" in grp else 0,
+                "Intens. min":           int(nsum(grp["Intensywne_min"]))                                             if "Intensywne_min" in grp else 0,
             }
             week_rows.append(r)
 
@@ -1104,10 +1115,12 @@ with tab_tygodnie:
                 existing = {"Tydzień": key, "_key": key}
                 week_rows.append(existing)
             if "Kcal" in grp.columns:
-                existing["Spożyte kcal suma"]    = round(grp["Kcal"].dropna().sum())
-                existing["Spożyte kcal śr/dzień"] = round(grp["Kcal"].dropna().mean())
+                existing["Spożyte kcal suma"]    = round(nsum(grp["Kcal"]))
+                _mk = nmean(grp["Kcal"])
+                existing["Spożyte kcal śr/dzień"] = round(_mk) if pd.notna(_mk) else 0
             if "Bialko_g" in grp.columns:
-                existing["Białko śr (g)"] = round(grp["Bialko_g"].dropna().mean(), 1)
+                _mb = nmean(grp["Bialko_g"])
+                existing["Białko śr (g)"] = round(_mb, 1) if pd.notna(_mb) else 0
 
     # Bilans tygodniowy
     if not hist_dz.empty and not hist_fit.empty:
