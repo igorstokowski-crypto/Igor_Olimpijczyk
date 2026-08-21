@@ -1,6 +1,6 @@
 # 🏃 Igor Health Dashboard — Dokumentacja
 
-> Ostatnia aktualizacja: 24.03.2026
+> Ostatnia aktualizacja: 21.08.2026
 
 ---
 
@@ -11,7 +11,7 @@ Osobisty dashboard zdrowotny, który automatycznie pobiera dane z trzech źróde
 - **Fitatu** — kalorie spożyte, makroskładniki, lista produktów
 - **Hevy** — treningi siłowe (serie, powtórzenia, ciężary)
 
-Dane lądują w **Google Sheets** i lokalnym **Excel/CSV**, a dashboard jest dostępny online przez **Streamlit Cloud**.
+Dane lądują w **Postgres** i lokalnym **Excel/CSV**, a dashboard jest dostępny online (login/hasło) i docelowo ma pokazywać też treningi znajomych z Garmin Connect.
 
 ---
 
@@ -25,14 +25,13 @@ Garmin Connect API
 sync.py ←── Fitatu API
       ↓    ←── Hevy API
       ↓
-Google Sheets (7 zakładek)  +  lokalny Excel/CSV
+Postgres (db/schema.sql)  +  lokalny Excel/CSV
       ↓
-dashboard.py (Streamlit)
-      ↓
-https://igorolimpijczyk-kgyrhrrjpdjkhvaamlyrmt.streamlit.app
+dashboard.py (Streamlit, login przez app_users)
 ```
 
 **Automatyzacja:** GitHub Actions odpala `sync.py` co 3 godziny (8:00–22:00 czasu polskiego).
+Wymaga Postgresa dostępnego z internetu (adres w sekrecie `DATABASE_URL`) — patrz "Znane ograniczenia".
 
 ---
 
@@ -40,41 +39,52 @@ https://igorolimpijczyk-kgyrhrrjpdjkhvaamlyrmt.streamlit.app
 
 | Plik | Opis |
 |------|------|
-| `sync.py` | Główny skrypt synchronizacji — pobiera dane i zapisuje do Sheets + Excel |
-| `dashboard.py` | Dashboard Streamlit — wizualizacja danych z Google Sheets |
+| `sync.py` | Główny skrypt synchronizacji — pobiera dane i zapisuje do Postgres + Excel |
+| `dashboard.py` | Dashboard Streamlit — login + wizualizacja danych z Postgres |
+| `db/schema.sql` | Schemat Postgres (tabele, klucze) |
+| `db.py` | Połączenie z Postgres + inicjalizacja schematu (`python db.py`) |
+| `repository.py` | Warstwa dostępu do danych — cała logika zapisu/odczytu Postgres |
+| `auth.py` | Konta użytkowników strony (Igor + znajomi) — dodawanie, weryfikacja hasła |
+| `gmail_mfa.py` | Automatyczny odczyt kodu MFA Garmina z Gmaila (IMAP) |
+| `migrate_sheets_to_postgres.py` | Jednorazowa migracja historii ze starego Google Sheets |
 | `requirements.txt` | Zależności Python |
 | `.env` | Zmienne środowiskowe (lokalne — nie wchodzi do git) |
-| `SESJA_GARTH/` | Tokeny OAuth Garmin (`oauth1_token.json` + `oauth2_token.json`) |
+| `SESJA_GARTH/` | Zapisana sesja logowania Garmin (`garmin_tokens.json`) |
 | `.github/workflows/sync.yml` | GitHub Actions — automatyczny sync |
 | `exports/` | Lokalny eksport: `sync_data.xlsx` + CSV |
 
 ---
 
-## Google Sheets — zakładki
+## Postgres — tabele (`db/schema.sql`)
 
-| Zakładka | Zawartość | Klucz | Metoda zapisu |
-|----------|-----------|-------|---------------|
-| `Dziennik` | Kroki, sen, kalorie, HR, waga — każdy dzień | Data | upsert (nadpisuje) |
-| `Aktywności` | Treningi: dystans, czas, tempo, HR, GPS meta | ID | upsert (nadpisuje) |
-| `Okrążenia` | Km-splity każdego biegu | Data+Nr | upsert |
-| `Fitatu` | Dzienne makro: kcal, białko, tłuszcz, węgle | Data | upsert (nadpisuje) |
-| `FitatuProdukty` | Każdy produkt z każdego dnia | Data (multi) | delete+insert |
-| `Hevy` | Serie siłowe: ćwiczenie, kg, reps | ID serii | append (tylko nowe) |
-| `Trasy` | Trasy GPS jako JSON | ID aktywności | append (tylko nowe) |
-| `General` | Dane statyczne: waga ręczna (E2), wzrost | — | NIE ruszane przez sync |
+| Tabela | Zawartość | Klucz |
+|--------|-----------|-------|
+| `app_users` | Konta logowania na stronę (Igor + znajomi) | username/email |
+| `garmin_people` | Osoby śledzone przez Garmina (właściciel + znajomi z newsfeedu) | garmin_profile_id |
+| `daily_summary` | Kroki, sen, kalorie, HR, waga — każdy dzień (tylko właściciel) | person_id + date |
+| `activities` | Treningi: dystans, czas, tempo, HR, GPS meta (własne + znajomych) | id (Garmin activity id) |
+| `activity_laps` | Km-splity każdego biegu | activity_id + lap_number |
+| `gps_tracks` | Trasy GPS jako JSON | activity_id |
+| `fitatu_daily` | Dzienne makro: kcal, białko, tłuszcz, węgle | person_id + date |
+| `fitatu_products` | Każdy produkt z każdego dnia | — (usuwa+wstawia per dzień) |
+| `hevy_sets` | Serie siłowe: ćwiczenie, kg, reps | workout_id + exercise_order + set_number |
+| `manual_metrics` | Waga wpisywana ręcznie (zastępuje dawne `General!E2`) | person_id + date |
+
+`person_id` na razie wskazuje wyłącznie na Igora (`is_owner = TRUE`) — kolumna istnieje pod przyszłą
+funkcję feedu znajomych z Garmin Connect (`source = 'connection_feed'` w `activities`).
 
 ---
 
 ## sync.py — jak działa
 
 ### Logika odświeżania
-- **Dziś i wczoraj** — zawsze pobierane od nowa (nawet jeśli już są w Sheets)
-- **Starsze dni** — pomijane jeśli już istnieją w Sheets
+- **Dziś i wczoraj** — zawsze pobierane od nowa (nawet jeśli już są w Postgres)
+- **Starsze dni** — pomijane jeśli już istnieją w Postgres
 - **GitHub Actions** — pobiera ostatnie 7 dni; lokalnie — ostatnie 30 dni
 
 ### Garmin
 ```python
-garmin_login()          # loguje przez garth (OAuth2, bez MFA dzięki cache tokenów)
+garmin_login()          # Garmin(return_on_mfa=True) + resume_login() z kodem z Gmaila
 fetch_garmin_daily()    # kroki, sen, kalorie, HR, stres
 fetch_garmin_activity() # szczegóły treningu (tempo, wznios, VO2max, itd.)
 fetch_gps_track()       # trasa GPS jako lista {lat, lon, ele}
@@ -92,11 +102,15 @@ fetch_fitatu_day()      # kcal + makro dzienne + lista produktów
 fetch_hevy_workouts()   # paginacja /v1/workouts → serie z kg×reps
 ```
 
-### Zapis do Sheets
+### Zapis do Postgres (`repository.py`)
 ```python
-upsert_to_sheet()    # update istniejącego wiersza LUB append nowego (po kluczu z kol. A)
-upsert_multirow()    # dla FitatuProdukty — usuwa stare wiersze dnia i wstawia świeże
-append_to_sheet()    # tylko nowe wiersze (Hevy, Trasy)
+repo.upsert_daily()             # Dziennik — insert/update po (person_id, date)
+repo.upsert_activities()        # Aktywności — insert/update po id
+repo.upsert_laps()              # Okrążenia — insert/update po (activity_id, lap_number)
+repo.upsert_gps_tracks()        # Trasy — insert/update po activity_id
+repo.upsert_fitatu_daily()      # Fitatu
+repo.replace_fitatu_products()  # FitatuProdukty — usuwa stare wiersze dnia i wstawia świeże
+repo.upsert_hevy_sets()         # Hevy — insert, nigdy nie nadpisuje (ON CONFLICT DO NOTHING)
 ```
 
 ---
@@ -105,7 +119,7 @@ append_to_sheet()    # tylko nowe wiersze (Hevy, Trasy)
 
 ### 1. Hero (górny baner)
 - Zdjęcie (180px, kółko) + Imię
-- Waga (z `General!E2`) · Wzrost 181 cm
+- Waga (ręcznie wpisywana — sekcja "⚖️ Zaktualizuj wagę" na dashboardzie) · Wzrost 181 cm
 - Sen (z dziś — Garmin zapisuje sen nocy pod datą przebudzenia)
 - Data
 
@@ -151,6 +165,26 @@ sleep_h = row_td["Sen_h"]
 
 ---
 
+## Konta i logowanie
+
+Dashboard wymaga zalogowania (formularz login/hasło) — jedno konto per osoba
+(Igor + znajomi), tabela `app_users` w Postgres.
+
+**Dodanie konta:**
+```bash
+python auth.py add <username> <email> "Wyświetlana nazwa"
+# zapyta o hasło (nie jest przekazywane jako argument)
+```
+
+**Lista kont:**
+```bash
+python auth.py list
+```
+
+Hasła są hashowane (bcrypt) — nigdy nie są zapisywane ani logowane jawnie.
+
+---
+
 ## GitHub Actions — sync.yml
 
 ```yaml
@@ -164,15 +198,14 @@ on:
 
 | Secret | Zawartość |
 |--------|-----------|
-| `GARTH_SESSION` | `tar.gz` obu tokenów Garmin zakodowany base64 |
+| `GARTH_SESSION` | `tar.gz` sesji Garmin (`SESJA_GARTH/`) zakodowany base64 |
 | `GARMIN_EMAIL` | Email konta Garmin (to samo konto Gmail co niżej) |
 | `GARMIN_PASSWORD` | Hasło Garmin |
 | `GMAIL_IMAP_APP_PASSWORD` | Hasło aplikacji Gmail — do automatycznego odczytu kodu MFA (patrz niżej) |
 | `FITATU_EMAIL` | Email Fitatu |
 | `FITATU_PASSWORD` | Hasło Fitatu |
 | `HEVY_API_KEY` | Klucz API Hevy |
-| `SPREADSHEET_ID` | ID arkusza Google Sheets |
-| `GOOGLE_CREDENTIALS_JSON` | JSON klucza service account Google |
+| `DATABASE_URL` | Connection string do Postgres — **musi być dostępny z internetu** (patrz "Znane ograniczenia") |
 
 ### Jak zakodować sesję Garmin do sekretu
 ```python
@@ -212,9 +245,10 @@ więc MFA/Gmail jest potrzebne tylko gdy sesja wygaśnie lub jeszcze jej nie ma.
 
 Waga **nie** pobiera się z Garmina (brak podpiętej wagi Garmin Index).
 
-**Gdzie wpisać:** Google Sheets → zakładka `General` → komórka **E2**
+**Gdzie wpisać:** na dashboardzie → rozwiń "⚖️ Zaktualizuj wagę" → wpisz i zapisz
+(zapisuje się do tabeli `manual_metrics` w Postgres).
 
-Sync nigdy nie nadpisuje tej komórki. Dashboard odczytuje ją przy każdym odświeżeniu.
+Sync nigdy nie nadpisuje tej wartości.
 
 ---
 
@@ -226,18 +260,29 @@ pip install -r requirements.txt
 
 # 2. Skonfiguruj .env (skopiuj z .env.example)
 cp .env.example .env
-# uzupełnij dane: Garmin, Fitatu, Hevy, Google Sheets ID
+# uzupełnij dane: Garmin, Gmail, Fitatu, Hevy, DATABASE_URL
 
-# 3. Wstaw credentials Google
-# Pobierz plik JSON z Google Cloud Console (Service Account)
-# Zapisz jako credentials.json
+# 3. Zainicjalizuj schemat Postgres (jednorazowo / bezpiecznie powtarzalne)
+python db.py
 
-# 4. Odpal sync — pierwsze uruchomienie samo się zaloguje i (jeśli trzeba)
+# 4. Dodaj sobie konto logowania do dashboardu
+python auth.py add igor twoj@email.com "Igor"
+
+# 5. Odpal sync — pierwsze uruchomienie samo się zaloguje i (jeśli trzeba)
 #    pobierze kod MFA z Gmaila (GMAIL_IMAP_APP_PASSWORD w .env)
 python sync.py
 
-# 5. Uruchom dashboard lokalnie
+# 6. Uruchom dashboard lokalnie
 streamlit run dashboard.py
+```
+
+### Migracja starych danych z Google Sheets (jednorazowo)
+
+Jeśli masz historię w starym arkuszu Google Sheets, przenieś ją do Postgres:
+```bash
+# potrzebne: SPREADSHEET_ID, GOOGLE_CREDENTIALS (credentials.json),
+# GARMIN_DISPLAY_NAME (profil z URL connect.garmin.com/app/profile/<TU>)
+python migrate_sheets_to_postgres.py
 ```
 
 ---
@@ -247,13 +292,14 @@ streamlit run dashboard.py
 | Problem | Przyczyna | Rozwiązanie |
 |---------|-----------|-------------|
 | Kroki z GitHub Actions mogą być stare | Zegarek nie zdążył zsync z Garmin Connect przed uruchomieniem workflow | Odpal sync lokalnie po powrocie do domu |
-| Waga nie pobiera się z Garmina | Brak wagi Garmin Index | Wpisuj ręcznie w Google Sheets → General → E2 |
+| Waga nie pobiera się z Garmina | Brak wagi Garmin Index | Wpisuj ręcznie na dashboardzie ("⚖️ Zaktualizuj wagę") |
 | Sesja Garmin wygasa | Tokeny OAuth wygasają po pewnym czasie | Nic nie trzeba robić ręcznie — `sync.py` sam się przeloguje i pobierze kod MFA z Gmaila (patrz "Automatyczne MFA przez Gmail" wyżej) |
+| **GitHub Actions nie zapisze danych bez dostępnego Postgresa** | `DATABASE_URL` musi być osiągalny z internetu (runnery GitHub Actions nie widzą `localhost` na Twoim komputerze) | Dopóki nie ma VPS-a: postaw Postgres na darmowym hostingu (np. Neon/Supabase/Railway) i wstaw jego connection string jako sekret `DATABASE_URL`; docelowo — Postgres na własnym VPS-ie |
 
 ---
 
 ## Dashboard online
 
-🌐 **https://igorolimpijczyk-kgyrhrrjpdjkhvaamlyrmt.streamlit.app**
+Wymaga hostingu (patrz wyżej — obecnie w trakcie przenoszenia na własny VPS).
 
 Repozytorium: **https://github.com/igorstokowski-crypto/Igor_Olimpijczyk**

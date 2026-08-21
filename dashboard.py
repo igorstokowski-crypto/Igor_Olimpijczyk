@@ -6,20 +6,14 @@ dashboard.py — Personal health dashboard for Igor
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
 from datetime import date, datetime, timedelta
 import os, json
 from dotenv import load_dotenv
 
-load_dotenv()
+import auth
+import repository as repo
 
-try:
-    SPREADSHEET_ID = st.secrets.get("SPREADSHEET_ID", os.getenv("SPREADSHEET_ID", ""))
-except Exception:
-    SPREADSHEET_ID = os.getenv("SPREADSHEET_ID", "")
-CREDS_FILE = os.getenv("GOOGLE_CREDENTIALS", "credentials.json")
-SCOPES         = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+load_dotenv()
 
 st.set_page_config(page_title="Igor · Dashboard", page_icon="🏃", layout="wide")
 
@@ -105,28 +99,43 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── Google Sheets ──────────────────────────────────────────────────────────────
-@st.cache_resource
-def _svc():
-    try:
-        info = json.loads(st.secrets["GOOGLE_CREDENTIALS_JSON"])
-        creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-    except Exception:
-        creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
-    return build("sheets", "v4", credentials=creds).spreadsheets()
+# ── LOGOWANIE ────────────────────────────────────────────────────────────────
+if "user" not in st.session_state:
+    st.markdown("<div style='max-width:360px;margin:8rem auto 0'>", unsafe_allow_html=True)
+    st.title("🏃 Igor Health Dashboard")
+    with st.form("login_form"):
+        username = st.text_input("Login")
+        password = st.text_input("Hasło", type="password")
+        submitted = st.form_submit_button("Zaloguj")
+    if submitted:
+        user = auth.verify_user(username, password)
+        if user:
+            st.session_state["user"] = user
+            st.rerun()
+        else:
+            st.error("Błędny login lub hasło")
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.stop()
 
+owner_person_id = repo.get_owner_person_id()
+if owner_person_id is None:
+    st.error("Brak zarejestrowanej osoby-właściciela w bazie — uruchom najpierw sync.py.")
+    st.stop()
+
+_top_l, _top_r = st.columns([10, 1])
+with _top_r:
+    if st.button("Wyloguj", use_container_width=True):
+        del st.session_state["user"]
+        st.rerun()
+
+
+# ── Postgres ─────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=60, show_spinner=False)
-def sheet(tab: str) -> pd.DataFrame:
+def sheet(tab: str, person_id: int) -> pd.DataFrame:
     try:
-        rows = _svc().values().get(
-            spreadsheetId=SPREADSHEET_ID, range=f"'{tab}'!A:ZZ"
-        ).execute().get("values", [])
-        if len(rows) < 2:
-            return pd.DataFrame()
-        n = len(rows[0])
-        return pd.DataFrame([r + [""] * (n - len(r)) for r in rows[1:]], columns=rows[0])
+        return repo.read_table_compat(tab, person_id)
     except Exception as e:
-        st.warning(f"Błąd zakładki '{tab}': {e}")
+        st.warning(f"Błąd '{tab}': {e}")
         return pd.DataFrame()
 
 
@@ -153,13 +162,12 @@ yday  = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
 # ── Load ───────────────────────────────────────────────────────────────────────
 with st.spinner(""):
-    df_dz    = sheet("Dziennik")
-    df_akt   = sheet("Aktywności")
-    df_hevy  = sheet("Hevy")
-    df_fit   = sheet("Fitatu")
-    df_prod  = sheet("FitatuProdukty")
-    df_gen   = sheet("General")
-    df_trasy = sheet("Trasy")
+    df_dz    = sheet("Dziennik", owner_person_id)
+    df_akt   = sheet("Aktywności", owner_person_id)
+    df_hevy  = sheet("Hevy", owner_person_id)
+    df_fit   = sheet("Fitatu", owner_person_id)
+    df_prod  = sheet("FitatuProdukty", owner_person_id)
+    df_trasy = sheet("Trasy", owner_person_id)
 
 
 
@@ -221,13 +229,18 @@ if not df_fit2.empty:
 
 shared_date = garmin_date
 
-# weight — z arkusza General, komórka E2 (Current Weight)
-latest_weight = None
-try:
-    if not df_gen.empty and len(df_gen.columns) >= 5:
-        latest_weight = n(df_gen.iloc[0, 4])
-except Exception:
-    pass
+# weight — ręcznie wprowadzona waga (manual_metrics)
+latest_weight = repo.get_latest_manual_weight(owner_person_id)
+
+with st.expander("⚖️ Zaktualizuj wagę"):
+    new_weight = st.number_input(
+        "Waga (kg)", min_value=30.0, max_value=250.0,
+        value=latest_weight or 80.0, step=0.1, format="%.1f",
+    )
+    if st.button("Zapisz wagę"):
+        repo.set_manual_weight(owner_person_id, new_weight)
+        st.cache_data.clear()
+        st.rerun()
 
 # Sen zawsze z dziś (Garmin zapisuje sen nocy pod datą przebudzenia)
 sleep_h     = n(row_td.get("Sen_h"))     if row_td is not None else (n(row_yd.get("Sen_h"))     if row_yd is not None else None)
@@ -1152,7 +1165,7 @@ with tab_tygodnie:
             existing["Treningi"] = len(grp)
             existing["Biegi"]    = int(typs.isin({"running","trail_running","treadmill_running"}).sum())
             if "Dystans_km" in grp.columns:
-                existing["Biegi km"] = round(float(grp.loc[typs.isin({"running","trail_running","treadmill_running"}), "Dystans_km"].apply(n).sum()), 1)
+                existing["Biegi km"] = round(nsum(grp.loc[typs.isin({"running","trail_running","treadmill_running"}), "Dystans_km"]), 1)
 
     if not df_hevy.empty and "ID_treningu" in df_hevy.columns:
         hv_w = df_hevy.copy()

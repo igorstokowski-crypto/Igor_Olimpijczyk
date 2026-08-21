@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-sync.py — Unified sync: Garmin + Fitatu + Hevy → Google Sheets + Excel + CSV
+sync.py — Unified sync: Garmin + Fitatu + Hevy → Postgres + Excel + CSV
 
-Google Sheets (6 zakładek):
-  Dziennik        — Garmin: codzienne kroki, sen, kalorie, HR, waga
-  Aktywności      — Garmin: treningi (bieg pełne dane, rower/pływanie/chód podstawowe)
-  Okrążenia       — Garmin: km-splits każdego biegu
-  Fitatu          — Fitatu: dzienne makro (kcal, białko, tłuszcz, węgle)
-  FitatuProdukty  — Fitatu: każdy produkt z każdego dnia
-  Hevy            — Hevy: serie siłowe (1 wiersz = 1 seria)
+Tabele Postgres (patrz db/schema.sql):
+  daily_summary    — Garmin: codzienne kroki, sen, kalorie, HR, waga
+  activities       — Garmin: treningi (bieg pełne dane, rower/pływanie/chód podstawowe)
+  activity_laps    — Garmin: km-splits każdego biegu
+  fitatu_daily     — Fitatu: dzienne makro (kcal, białko, tłuszcz, węgle)
+  fitatu_products  — Fitatu: każdy produkt z każdego dnia
+  hevy_sets        — Hevy: serie siłowe (1 wiersz = 1 seria)
 
 Excel + CSV: exports/sync_data.xlsx  +  6x .csv w exports/
 
@@ -30,16 +30,14 @@ import requests
 from garminconnect import Garmin
 from gmail_mfa import fetch_garmin_mfa_code
 import pandas as pd
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
+
+import repository as repo
 
 # ── KONFIGURACJA ──────────────────────────────────────
 GARMIN_EMAIL     = os.environ["GARMIN_EMAIL"]
 GARMIN_PASSWORD  = os.environ["GARMIN_PASSWORD"]
 FITATU_EMAIL     = os.environ["FITATU_EMAIL"]
 FITATU_PASSWORD  = os.environ["FITATU_PASSWORD"]
-SPREADSHEET_ID   = os.environ["SPREADSHEET_ID"]
-CREDENTIALS_FILE = os.environ.get("GOOGLE_CREDENTIALS", "even-ally-480810-a1-b7b5e8ed226a.json")
 
 SESSION_DIR    = Path(__file__).parent / "SESJA_GARTH"
 LAST_SYNC_FILE = Path(__file__).parent / "last_sync.json"
@@ -456,7 +454,7 @@ def fetch_hevy_workouts(existing_ids: set) -> list[dict]:
             w_title  = workout.get("title", "")
             w_desc   = workout.get("description", "") or ""
 
-            for ex in workout.get("exercises") or []:
+            for ex_order, ex in enumerate(workout.get("exercises") or []):
                 ex_title  = ex.get("title", "")
                 ex_notes  = ex.get("notes", "") or ""
                 superset  = ex.get("supersets_id")
@@ -464,6 +462,7 @@ def fetch_hevy_workouts(existing_ids: set) -> list[dict]:
                 for s in ex.get("sets") or []:
                     rows.append({
                         "ID_treningu":       wid,
+                        "Cwiczenie_kolejnosc": ex_order,
                         "Data_start":        _fmt_dt(start),
                         "Data_koniec":       _fmt_dt(end),
                         "Czas_trwania":      _duration(start, end),
@@ -486,175 +485,6 @@ def fetch_hevy_workouts(existing_ids: set) -> list[dict]:
     print()  # newline po \r
     return rows
 
-# ── GOOGLE SHEETS ─────────────────────────────────────
-def get_sheets():
-    creds = Credentials.from_service_account_file(
-        CREDENTIALS_FILE,
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
-    )
-    return build("sheets", "v4", credentials=creds).spreadsheets()
-
-def ensure_tabs(sheets, tabs_cols: dict[str, list]):
-    """Tworzy brakujące zakładki i uzupełnia brakujące nagłówki."""
-    meta     = sheets.get(spreadsheetId=SPREADSHEET_ID).execute()
-    existing = {s["properties"]["title"] for s in meta["sheets"]}
-
-    # Utwórz brakujące zakładki
-    to_create = [t for t in tabs_cols if t not in existing]
-    if to_create:
-        sheets.batchUpdate(
-            spreadsheetId=SPREADSHEET_ID,
-            body={"requests": [{"addSheet": {"properties": {"title": t}}} for t in to_create]}
-        ).execute()
-        for tab in to_create:
-            print(f"  ➕ Utworzono zakładkę: {tab}")
-
-    # Zapisz nagłówki wszędzie gdzie wiersz 1 jest pusty
-    for tab, headers in tabs_cols.items():
-        res = sheets.values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{tab}'!A1:Z1",
-        ).execute()
-        if not res.get("values"):  # wiersz 1 pusty — dodaj nagłówki
-            sheets.values().update(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f"'{tab}'!A1",
-                valueInputOption="RAW",
-                body={"values": [headers]},
-            ).execute()
-            print(f"  📋 Nagłówki dodane: {tab}")
-
-def get_existing_keys(sheets, tab: str) -> dict:
-    """Zwraca {klucz: numer_wiersza} (wiersz 2 = indeks 0)."""
-    try:
-        res = sheets.values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{tab}'!A2:A",
-        ).execute()
-        return {r[0]: i + 2 for i, r in enumerate(res.get("values") or []) if r}
-    except Exception:
-        return {}
-
-def upsert_to_sheet(sheets, tab: str, cols: list, rows: list[dict]):
-    """Insert nowych wierszy, update istniejących (po kluczu w kolumnie A)."""
-    if not rows:
-        print(f"  {tab}: brak danych")
-        return
-
-    key_to_row = get_existing_keys(sheets, tab)
-    to_insert, batch_data = [], []
-
-    for r in rows:
-        key    = str(r.get(cols[0], ""))
-        values = [str(r.get(c, "")) for c in cols]
-        if key in key_to_row:
-            row_num = key_to_row[key]
-            end_col = chr(ord("A") + len(cols) - 1)
-            batch_data.append({
-                "range":  f"'{tab}'!A{row_num}:{end_col}{row_num}",
-                "values": [values],
-            })
-        else:
-            to_insert.append(values)
-
-    if batch_data:
-        sheets.values().batchUpdate(
-            spreadsheetId=SPREADSHEET_ID,
-            body={"valueInputOption": "USER_ENTERED", "data": batch_data},
-        ).execute()
-        print(f"  ✓ {tab}: zaktualizowano {len(batch_data)} wierszy")
-
-    if to_insert:
-        sheets.values().append(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{tab}'!A2",
-            valueInputOption="USER_ENTERED",
-            insertDataOption="INSERT_ROWS",
-            body={"values": to_insert},
-        ).execute()
-        print(f"  ✓ {tab}: +{len(to_insert)} nowych wierszy")
-
-def upsert_multirow(sheets, tab: str, cols: list, rows: list[dict], date_key: str):
-    """
-    Dla zakładek gdzie 1 dzień = wiele wierszy (FitatuProdukty, Okrążenia).
-    Usuwa wszystkie wiersze dla danej daty i wstawia świeże.
-    """
-    if not rows:
-        return
-
-    dates_to_refresh = {str(r.get(date_key, "")) for r in rows}
-
-    # Pobierz wszystkie wiersze żeby znaleźć numery do usunięcia
-    try:
-        res = sheets.values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f"'{tab}'!A2:A",
-        ).execute()
-        existing_col_a = res.get("values") or []
-    except Exception:
-        existing_col_a = []
-
-    rows_to_delete = [
-        i + 2  # numer wiersza w Sheets (1-indexed, +1 za nagłówek)
-        for i, r in enumerate(existing_col_a)
-        if r and r[0] in dates_to_refresh
-    ]
-
-    # Usuń od końca (żeby numery się nie przesuwały)
-    if rows_to_delete:
-        requests_list = [
-            {
-                "deleteDimension": {
-                    "range": {
-                        "sheetId":    _get_sheet_id(sheets, tab),
-                        "dimension":  "ROWS",
-                        "startIndex": rn - 1,  # 0-indexed
-                        "endIndex":   rn,
-                    }
-                }
-            }
-            for rn in sorted(rows_to_delete, reverse=True)
-        ]
-        sheets.batchUpdate(
-            spreadsheetId=SPREADSHEET_ID,
-            body={"requests": requests_list},
-        ).execute()
-        print(f"  {tab}: usunięto {len(rows_to_delete)} starych wierszy")
-
-    # Wstaw świeże
-    values = [[str(r.get(c, "")) for c in cols] for r in rows]
-    sheets.values().append(
-        spreadsheetId=SPREADSHEET_ID,
-        range=f"'{tab}'!A2",
-        valueInputOption="USER_ENTERED",
-        insertDataOption="INSERT_ROWS",
-        body={"values": values},
-    ).execute()
-    print(f"  ✓ {tab}: +{len(rows)} wierszy")
-
-_sheet_id_cache = {}
-def _get_sheet_id(sheets, tab_name: str) -> int:
-    if tab_name not in _sheet_id_cache:
-        meta = sheets.get(spreadsheetId=SPREADSHEET_ID).execute()
-        for s in meta["sheets"]:
-            _sheet_id_cache[s["properties"]["title"]] = s["properties"]["sheetId"]
-    return _sheet_id_cache[tab_name]
-
-def append_to_sheet(sheets, tab: str, cols: list, rows: list[dict]):
-    """Zachowane dla Hevy — tylko nowe (nie nadpisujemy historii treningów)."""
-    if not rows:
-        print(f"  {tab}: brak nowych danych")
-        return
-    values = [[str(r.get(c, "")) for c in cols] for r in rows]
-    sheets.values().append(
-        spreadsheetId=SPREADSHEET_ID,
-        range=f"'{tab}'!A2",
-        valueInputOption="USER_ENTERED",
-        insertDataOption="INSERT_ROWS",
-        body={"values": values},
-    ).execute()
-    print(f"  ✓ {tab}: +{len(rows)} wierszy")
-
 # ── EKSPORT LOKALNY ───────────────────────────────────
 
 def _n(v):
@@ -662,32 +492,18 @@ def _n(v):
     try: return float(str(v).replace(",", ".").strip())
     except: return None
 
-def _read_full_sheet(sheets, tab: str) -> pd.DataFrame:
-    """Wczytuje cały arkusz Google Sheets jako DataFrame."""
-    try:
-        res = sheets.values().get(
-            spreadsheetId=SPREADSHEET_ID, range=f"'{tab}'!A:ZZ"
-        ).execute()
-        rows = res.get("values", [])
-        if len(rows) < 2:
-            return pd.DataFrame()
-        n = len(rows[0])
-        return pd.DataFrame([r + [""] * (n - len(r)) for r in rows[1:]], columns=rows[0])
-    except Exception:
-        return pd.DataFrame()
-
-def build_analytics(sheets) -> dict[str, pd.DataFrame]:
+def build_analytics(person_id: int) -> dict[str, pd.DataFrame]:
     """
-    Czyta pełną historię z Google Sheets i oblicza arkusze analityczne.
+    Czyta pełną historię z Postgres i oblicza arkusze analityczne.
     Zwraca słownik {nazwa_arkusza: DataFrame}.
     """
     import numpy as np
 
     # ── Wczytaj pełną historię ─────────────────────────
-    df_dz   = _read_full_sheet(sheets, "Dziennik")
-    df_akt  = _read_full_sheet(sheets, "Aktywności")
-    df_fit  = _read_full_sheet(sheets, "Fitatu")
-    df_hevy = _read_full_sheet(sheets, "Hevy")
+    df_dz   = repo.read_table_compat("Dziennik", person_id)
+    df_akt  = repo.read_table_compat("Aktywności", person_id)
+    df_fit  = repo.read_table_compat("Fitatu", person_id)
+    df_hevy = repo.read_table_compat("Hevy", person_id)
 
     # Normalizuj Fitatu — stare nagłówki: 'Dzień','Białko (g)','Tłuszcze (G)','Węgle (g)'
     if not df_fit.empty:
@@ -1119,49 +935,7 @@ def build_analytics(sheets) -> dict[str, pd.DataFrame]:
     return result
 
 
-def save_analytics_to_sheets(sheets, analytics: dict[str, pd.DataFrame]):
-    """
-    Zapisuje arkusze analityczne do Google Sheets.
-    Każdy DataFrame → osobna zakładka (całkowity nadpis: usuń + wstaw nowe dane).
-    """
-    for tab_name, df in analytics.items():
-        if df.empty:
-            print(f"  {tab_name}: brak danych — pominięto")
-            continue
-        try:
-            # Wypełnij NaN pustymi stringami, konwertuj wszystko na string
-            df_clean = df.fillna("").astype(str)
-            header = [list(df_clean.columns)]
-            rows   = df_clean.values.tolist()
-            values = header + rows
-
-            # Sprawdź czy zakładka istnieje — jeśli nie, utwórz
-            meta = sheets.get(spreadsheetId=SPREADSHEET_ID).execute()
-            existing_titles = [s["properties"]["title"] for s in meta.get("sheets", [])]
-
-            if tab_name not in existing_titles:
-                sheets.batchUpdate(
-                    spreadsheetId=SPREADSHEET_ID,
-                    body={"requests": [{"addSheet": {"properties": {"title": tab_name}}}]}
-                ).execute()
-
-            # Wyczyść zawartość i wstaw świeże dane
-            sheets.values().clear(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f"'{tab_name}'!A:ZZ"
-            ).execute()
-            sheets.values().update(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f"'{tab_name}'!A1",
-                valueInputOption="USER_ENTERED",
-                body={"values": values}
-            ).execute()
-            print(f"  ✓ {tab_name}: {len(rows)} wierszy → Google Sheets")
-        except Exception as e:
-            print(f"  ⚠️ {tab_name}: błąd zapisu do Sheets — {e}")
-
-
-def save_local(datasets: list[tuple[str, list, list]], sheets=None):
+def save_local(datasets: list[tuple[str, list, list]], person_id: int | None = None):
     OUTPUT_DIR.mkdir(exist_ok=True)
     xlsx_path = OUTPUT_DIR / "sync_data.xlsx"
     with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
@@ -1171,12 +945,12 @@ def save_local(datasets: list[tuple[str, list, list]], sheets=None):
             df.to_csv(OUTPUT_DIR / f"{safe_name}.csv", index=False, encoding="utf-8-sig")
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        # Arkusze analityczne — czytamy pełną historię z Google Sheets
+        # Arkusze analityczne — czytamy pełną historię z Postgres
         analytics = {}
-        if sheets is not None:
+        if person_id is not None:
             try:
                 import traceback
-                analytics = build_analytics(sheets)
+                analytics = build_analytics(person_id)
                 for aname, adf in analytics.items():
                     if not adf.empty:
                         adf.to_excel(writer, sheet_name=aname, index=False)
@@ -1186,7 +960,7 @@ def save_local(datasets: list[tuple[str, list, list]], sheets=None):
                 print(f"  ⚠️ Błąd analizy: {e}")
 
     print(f"  📁 {xlsx_path.name}  +  {len(datasets)}x .csv  →  /{OUTPUT_DIR.name}/")
-    return analytics  # zwróć żeby main mógł zapisać do Sheets
+    return analytics
 
 # ── GŁÓWNA LOGIKA ─────────────────────────────────────
 def main():
@@ -1209,45 +983,30 @@ def main():
     dates = get_dates(last_sync)
     print(f"Zakres: {dates[0]} - {dates[-1]}  ({len(dates)} dni)\n")
 
-    # Google Sheets — upewnij się że wszystkie zakładki istnieją
-    sheets = get_sheets()
-    ensure_tabs(sheets, {
-        "Dziennik":       DZIENNIK_COLS,
-        "Aktywności":     AKTYWNOSCI_COLS,
-        "Okrążenia":      OKRAZENIA_COLS,
-        "Fitatu":         FITATU_COLS,
-        "FitatuProdukty": FITATU_PROD_COLS,
-        "Hevy":           HEVY_COLS,
-        "Trasy":          TRASY_COLS,
-    })
+    # ── GARMIN — logowanie + rejestracja osoby (właściciela) ─────────────
+    print("─── GARMIN ───────────────────────────────────────")
+    garmin = garmin_login()
+    person_id = repo.get_or_create_person(garmin.display_name, "Igor", is_owner=True)
 
-    existing_hevy = get_existing_keys(sheets, "Hevy")
-    existing_akt  = get_existing_keys(sheets, "Aktywności")
+    current_weight = fetch_garmin_current_weight(garmin)
+    if current_weight:
+        print(f"  ⚖️  Aktualna waga z profilu: {current_weight} kg")
 
     today     = datetime.date.today().isoformat()
     yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
 
-    # Pobierz które istniejące wiersze mają puste Kroki (kolumna B)
-    dz_has_steps = {}  # {date_str: bool}
-    try:
-        res = sheets.values().get(
-            spreadsheetId=SPREADSHEET_ID, range="'Dziennik'!A2:B"
-        ).execute()
-        for r in (res.get("values") or []):
-            date_val  = r[0] if len(r) > 0 else ""
-            kroki_val = r[1] if len(r) > 1 else ""
-            dz_has_steps[date_val] = bool(kroki_val and kroki_val not in ("", "0"))
-    except Exception:
-        pass
+    existing_akt   = repo.existing_activity_ids(person_id)
+    existing_hevy  = repo.existing_hevy_workout_ids(person_id)
+    existing_trasy = repo.existing_track_ids(person_id)
+    existing_dz    = repo.existing_daily_dates(person_id)
+    dz_has_steps   = repo.daily_has_steps(person_id)
 
-    def should_refresh(date_str: str, existing_keys: dict) -> bool:
+    def should_refresh(date_str: str, existing_keys: set) -> bool:
         if date_str >= yesterday:          # dziś i wczoraj — zawsze
             return True
         if date_str not in existing_keys:  # brakujący wiersz
             return True
         return not dz_has_steps.get(date_str, True)  # pusty wiersz (brak kroków)
-
-    existing_trasy = get_existing_keys(sheets, "Trasy")
 
     new = {
         "Dziennik":       [],
@@ -1259,15 +1018,6 @@ def main():
         "Trasy":          [],
     }
 
-    # ── GARMIN ────────────────────────────────────────
-    print("─── GARMIN ───────────────────────────────────────")
-    garmin = garmin_login()
-
-    current_weight = fetch_garmin_current_weight(garmin)
-    if current_weight:
-        print(f"  ⚖️  Aktualna waga z profilu: {current_weight} kg")
-
-    existing_dz = get_existing_keys(sheets, "Dziennik")
     garmin_failed = []
     print("\n📅 Dane dzienne...")
     for date_str in dates:
@@ -1329,8 +1079,8 @@ def main():
     print("\n─── FITATU ───────────────────────────────────────")
     token, user_id = fitatu_login()
 
-    existing_fit  = get_existing_keys(sheets, "Fitatu")
-    existing_prod = get_existing_keys(sheets, "FitatuProdukty")
+    existing_fit  = repo.existing_fitatu_dates(person_id)
+    existing_prod = repo.existing_fitatu_product_dates(person_id)
     print("\n🥗 Dane żywieniowe...")
     for date_str in dates:
         if not should_refresh(date_str, existing_fit) and not should_refresh(date_str, existing_prod):
@@ -1355,19 +1105,19 @@ def main():
     else:
         print("  Brak nowych treningów")
 
-    # ── ZAPIS DO SHEETS ───────────────────────────────
-    print("\n─── GOOGLE SHEETS ────────────────────────────────")
-    upsert_to_sheet(sheets, "Dziennik",       DZIENNIK_COLS,    new["Dziennik"])
-    upsert_to_sheet(sheets, "Aktywności",     AKTYWNOSCI_COLS,  new["Aktywności"])
-    upsert_to_sheet(sheets, "Okrążenia",      OKRAZENIA_COLS,   new["Okrążenia"])
-    upsert_to_sheet(sheets, "Fitatu",         FITATU_COLS,      new["Fitatu"])
-    upsert_multirow(sheets, "FitatuProdukty", FITATU_PROD_COLS, new["FitatuProdukty"], "Data")
-    append_to_sheet(sheets, "Hevy",           HEVY_COLS,        new["Hevy"])
-    append_to_sheet(sheets, "Trasy",          TRASY_COLS,       new["Trasy"])
+    # ── ZAPIS DO POSTGRES ─────────────────────────────
+    print("\n─── POSTGRES ─────────────────────────────────────")
+    repo.upsert_daily(person_id, new["Dziennik"])
+    repo.upsert_activities(person_id, new["Aktywności"], source="own")
+    repo.upsert_laps(new["Okrążenia"])
+    repo.upsert_fitatu_daily(person_id, new["Fitatu"])
+    repo.replace_fitatu_products(person_id, new["FitatuProdukty"])
+    repo.upsert_hevy_sets(person_id, new["Hevy"])
+    repo.upsert_gps_tracks(new["Trasy"])
 
     # ── EKSPORT LOKALNY ───────────────────────────────
     print("\n─── EKSPORT LOKALNY ──────────────────────────────")
-    analytics = save_local([
+    save_local([
         ("Dziennik",       new["Dziennik"],       DZIENNIK_COLS),
         ("Aktywności",     new["Aktywności"],      AKTYWNOSCI_COLS),
         ("Okrążenia",      new["Okrążenia"],       OKRAZENIA_COLS),
@@ -1375,12 +1125,7 @@ def main():
         ("FitatuProdukty", new["FitatuProdukty"],  FITATU_PROD_COLS),
         ("Hevy",           new["Hevy"],            HEVY_COLS),
         ("Trasy",          new["Trasy"],           TRASY_COLS),
-    ], sheets=sheets)
-
-    # ── ANALITYKA → GOOGLE SHEETS ─────────────────────
-    if analytics:
-        print("\n─── ANALITYKA → GOOGLE SHEETS ────────────────────")
-        save_analytics_to_sheets(sheets, analytics)
+    ], person_id=person_id)
 
     # ── ZAPISZ DATĘ SYNC ──────────────────────────────
     today_str = datetime.date.today().isoformat()
