@@ -7,8 +7,8 @@ import os
 import shutil
 
 # --- KONFIGURACJA ---
-GARMIN_EMAIL = "igorstokowski@gmail.com"
-GARMIN_PASSWORD = "[Korek730)"
+GARMIN_EMAIL = os.environ["GARMIN_EMAIL"]
+GARMIN_PASSWORD = os.environ["GARMIN_PASSWORD"]
 WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzcY3bJvbcj6NHPcSJkN1ZpCiqNNNCpiGXwm8uzxG51bYFKI4nj8Cad-hCcSnzxU_PG/exec"
 
 GARMIN_DISPLAY_NAME = "c4bde228-f91e-44db-bb5c-040abe70b731"
