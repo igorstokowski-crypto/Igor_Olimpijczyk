@@ -25,9 +25,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import contextlib
 import requests
-import garth
 from garminconnect import Garmin
+from gmail_mfa import fetch_garmin_mfa_code
 import pandas as pd
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -160,62 +161,24 @@ def get_dates(from_date: str) -> list[str]:
 
 # ── GARMIN AUTH ───────────────────────────────────────
 def garmin_login() -> Garmin:
+    """
+    Loguje się do Garmin Connect. Jeśli w SESSION_DIR jest zapisana sesja,
+    używa jej bez MFA. W przeciwnym razie loguje się od nowa i — jeśli Garmin
+    zażąda kodu MFA — czeka na maila z kodem na dedykowanym koncie Gmail
+    (patrz gmail_mfa.py) zamiast pytać o kod interaktywnie.
+    """
     SESSION_DIR.mkdir(exist_ok=True)
-    token_file = SESSION_DIR / "oauth2_token.json"
 
-    print(f"  [debug] SESSION_DIR: {SESSION_DIR}")
-    print(f"  [debug] token_file istnieje: {token_file.exists()}")
+    client = Garmin(GARMIN_EMAIL, GARMIN_PASSWORD, return_on_mfa=True)
 
-    if token_file.exists():
-        try:
-            garth.resume(str(SESSION_DIR))
-            print("✅ Garmin: sesja z cache (bez MFA)")
-        except Exception as e:
-            print(f"  ⚠️ Sesja wygasła ({e}), loguję od nowa...")
-            token_file.unlink(missing_ok=True)
-            _garmin_fresh_login()
-    else:
-        _garmin_fresh_login()
-
-    client = Garmin(GARMIN_EMAIL, GARMIN_PASSWORD)
-    client.garth = garth.client
-
-    try:
-        profile = garth.client.connectapi("/userprofile-service/socialProfile")
-        client.display_name = profile.get("displayName")
-        print(f"  Profil: {client.display_name}")
-    except Exception as e:
-        client.display_name = os.environ.get("GARMIN_DISPLAY_NAME") or None
-
-    return client
-
-def _garmin_fresh_login():
-    token_file = SESSION_DIR / "oauth2_token.json"
-    print("⏳ Logowanie Garmin — może pojawić się kod MFA...")
+    login_started_at = datetime.datetime.now(datetime.timezone.utc)
     delays = [0, 30, 60, 120]
     for attempt, delay in enumerate(delays, 1):
         if delay:
             print(f"  ⏳ Rate limit — czekam {delay}s...")
             time.sleep(delay)
         try:
-            garth.login(GARMIN_EMAIL, GARMIN_PASSWORD)
-
-            # Próbuj wszystkich znanych metod zapisu sesji
-            try:
-                garth.save(str(SESSION_DIR))
-            except Exception:
-                try:
-                    garth.client.dump(str(SESSION_DIR))
-                except Exception:
-                    garth.home = str(SESSION_DIR)
-
-            print(f"  [debug] Pliki po logowaniu: {list(SESSION_DIR.glob('*'))}")
-
-            if token_file.exists():
-                print("✅ Zalogowano! Sesja zapisana — kolejne uruchomienia bez MFA")
-            else:
-                print("⚠️  Zalogowano, ale sesja NIE została zapisana na dysk!")
-                print("   Sprawdź uprawnienia do folderu lub wersję garth.")
+            mfa_status, _ = client.login(tokenstore=str(SESSION_DIR))
             break
         except Exception as e:
             if "429" in str(e) and attempt < len(delays):
@@ -223,15 +186,28 @@ def _garmin_fresh_login():
                 continue
             raise
 
+    if mfa_status == "needs_mfa":
+        print("🔐 Garmin wymaga kodu MFA — sprawdzam skrzynkę Gmail...")
+        code = fetch_garmin_mfa_code(since=login_started_at)
+        client.resume_login(None, code)
+        with contextlib.suppress(Exception):
+            client.client.dump(str(SESSION_DIR))
+        print("✅ Zalogowano przez MFA — sesja zapisana (kolejne uruchomienia bez MFA)")
+    else:
+        print("✅ Garmin: zalogowano (sesja z cache lub bez MFA)")
+
+    print(f"  Profil: {client.display_name}")
+    return client
+
 # ── GARMIN: POBIERZ WAGĘ Z PROFILU ───────────────────
-def fetch_garmin_current_weight() -> float | None:
+def fetch_garmin_current_weight(client: Garmin) -> float | None:
     """
     Pobiera wagę ustawioną ręcznie w Garmin > Ustawienia ogólne > Aktualna waga.
     Endpoint: /userprofile-service/userprofile/personal-information
     Zwraca wagę w kg lub None.
     """
     try:
-        data = garth.client.connectapi(
+        data = client.connectapi(
             "/userprofile-service/userprofile/personal-information"
         )
         weight_g = data.get("weight")  # w gramach
@@ -1287,7 +1263,7 @@ def main():
     print("─── GARMIN ───────────────────────────────────────")
     garmin = garmin_login()
 
-    current_weight = fetch_garmin_current_weight()
+    current_weight = fetch_garmin_current_weight(garmin)
     if current_weight:
         print(f"  ⚖️  Aktualna waga z profilu: {current_weight} kg")
 

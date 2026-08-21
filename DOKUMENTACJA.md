@@ -165,8 +165,9 @@ on:
 | Secret | Zawartość |
 |--------|-----------|
 | `GARTH_SESSION` | `tar.gz` obu tokenów Garmin zakodowany base64 |
-| `GARMIN_EMAIL` | Email konta Garmin |
+| `GARMIN_EMAIL` | Email konta Garmin (to samo konto Gmail co niżej) |
 | `GARMIN_PASSWORD` | Hasło Garmin |
+| `GMAIL_IMAP_APP_PASSWORD` | Hasło aplikacji Gmail — do automatycznego odczytu kodu MFA (patrz niżej) |
 | `FITATU_EMAIL` | Email Fitatu |
 | `FITATU_PASSWORD` | Hasło Fitatu |
 | `HEVY_API_KEY` | Klucz API Hevy |
@@ -185,6 +186,25 @@ print(base64.b64encode(buf.getvalue()).decode())
 "
 ```
 Wynik wklej jako wartość sekretu `GARTH_SESSION`.
+
+---
+
+## Automatyczne MFA przez Gmail
+
+Konto Garmin ma jako adres logowania dedykowany Gmail. Gdy Garmin przy logowaniu
+zażąda kodu weryfikacyjnego (MFA), `sync.py` **nie** pyta o niego interaktywnie —
+zamiast tego (`gmail_mfa.py`) loguje się przez IMAP na to konto Gmail, znajduje
+najnowszego maila od Garmina wysłanego po rozpoczęciu logowania i wyciąga z niego
+6-cyfrowy kod, którym kończy logowanie (`garmin.resume_login(...)`).
+
+Wymagane:
+- konto Gmail ustawione jako email logowania w Garmin Connect
+- hasło aplikacji Gmail (https://myaccount.google.com/apppasswords, wymaga
+  włączonej weryfikacji dwuetapowej na koncie Gmail) w sekrecie/zmiennej
+  `GMAIL_IMAP_APP_PASSWORD` — **nigdy nie w kodzie/git**
+
+Sesja Garmin (`SESJA_GARTH`/`GARTH_SESSION`) jest zapisywana po udanym logowaniu,
+więc MFA/Gmail jest potrzebne tylko gdy sesja wygaśnie lub jeszcze jej nie ma.
 
 ---
 
@@ -212,13 +232,11 @@ cp .env.example .env
 # Pobierz plik JSON z Google Cloud Console (Service Account)
 # Zapisz jako credentials.json
 
-# 4. Zaloguj Garmin (pierwsze uruchomienie — wymaga MFA)
-python -c "import garth; garth.login('email', 'haslo'); garth.save('SESJA_GARTH')"
-
-# 5. Odpal sync
+# 4. Odpal sync — pierwsze uruchomienie samo się zaloguje i (jeśli trzeba)
+#    pobierze kod MFA z Gmaila (GMAIL_IMAP_APP_PASSWORD w .env)
 python sync.py
 
-# 6. Uruchom dashboard lokalnie
+# 5. Uruchom dashboard lokalnie
 streamlit run dashboard.py
 ```
 
@@ -230,7 +248,7 @@ streamlit run dashboard.py
 |---------|-----------|-------------|
 | Kroki z GitHub Actions mogą być stare | Zegarek nie zdążył zsync z Garmin Connect przed uruchomieniem workflow | Odpal sync lokalnie po powrocie do domu |
 | Waga nie pobiera się z Garmina | Brak wagi Garmin Index | Wpisuj ręcznie w Google Sheets → General → E2 |
-| GitHub Actions wymaga aktualnej sesji Garmin | Tokeny OAuth wygasają | Co ~30 dni zaktualizuj sekret `GARTH_SESSION` |
+| Sesja Garmin wygasa | Tokeny OAuth wygasają po pewnym czasie | Nic nie trzeba robić ręcznie — `sync.py` sam się przeloguje i pobierze kod MFA z Gmaila (patrz "Automatyczne MFA przez Gmail" wyżej) |
 
 ---
 
